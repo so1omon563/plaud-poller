@@ -1,4 +1,9 @@
 #!/bin/zsh
 set -euo pipefail
-cd /Users/so1omon/homelab/plaud-poller
-exec /usr/bin/python3 -m plaud_poller.poll "$@"
+
+SCRIPT_DIR="${0:A:h}"
+REPO_ROOT="${SCRIPT_DIR:h}"
+cd "${REPO_ROOT}"
+
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+exec "${PYTHON_BIN}" -m plaud_poller.poll "$@"

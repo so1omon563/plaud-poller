@@ -1,14 +1,17 @@
 # plaud-poller
 
-A small, deterministic PLAUD poller for syncing recordings/transcripts/summaries to local disk and Obsidian without Applaud, Zapier, or Google Sheets.
+A small, deterministic PLAUD poller for syncing recordings, transcripts, and summaries to local disk and Markdown without Applaud, Zapier, or Google Sheets.
+
+The project was originally built to run from Hermes cron, but the poller itself is a normal Python CLI and can be run from cron, systemd, launchd, Docker, GitHub Actions/self-hosted runners, or manually.
 
 ## Goals
 
 - Poll PLAUD directly on a schedule.
-- Keep raw artifacts under `~/Documents/Plaud`.
-- Render/update Markdown notes under `~/Documents/Obsidian Vault/Plaud`.
-- Re-fetch and hash transcript/summary/title metadata so PLAUD-side edits propagate.
+- Store raw artifacts locally.
+- Render/update Markdown notes for Obsidian or any folder of Markdown files.
+- Re-fetch and hash transcript, summary, title, and metadata so PLAUD-side edits propagate.
 - Keep credentials local and out of git.
+- Avoid hardcoded machine-specific paths.
 
 ## Current status
 
@@ -18,13 +21,14 @@ Initial scaffold with:
 - Region auto-correction support for PLAUD regional API responses.
 - SQLite state DB.
 - Artifact writer.
-- Obsidian Markdown renderer.
+- Markdown renderer.
 - Dry-run/list-only mode.
 
 ## Setup
 
 ```bash
-cd /Users/so1omon/homelab/plaud-poller
+git clone https://github.com/so1omon563/plaud-poller.git
+cd plaud-poller
 cp .env.example .env
 chmod 600 .env
 $EDITOR .env
@@ -44,6 +48,31 @@ PLAUD_TOKEN='...'
 
 `PLAUD_AUTHORIZATION` wins when both are set.
 
+## Paths and portability
+
+All paths are configurable by environment variables. Leave them blank to use portable defaults.
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `PLAUD_DATA_DIR` | Base directory for state and artifacts | macOS: `~/Library/Application Support/plaud-poller`; Linux: `${XDG_DATA_HOME:-~/.local/share}/plaud-poller`; Windows: `%LOCALAPPDATA%\\plaud-poller` or `%APPDATA%\\plaud-poller` |
+| `PLAUD_RECORDINGS_DIR` | Raw recording artifact directory | `$PLAUD_DATA_DIR/recordings` |
+| `PLAUD_STATE_DB` | SQLite state database path | `$PLAUD_DATA_DIR/state.sqlite` |
+| `PLAUD_OBSIDIAN_DIR` | Markdown output directory | `$PLAUD_DATA_DIR/obsidian-notes` |
+
+Example for Obsidian:
+
+```bash
+PLAUD_DATA_DIR=~/Documents/Plaud
+PLAUD_OBSIDIAN_DIR=~/Documents/Obsidian/Plaud
+```
+
+Example for a server:
+
+```bash
+PLAUD_DATA_DIR=/var/lib/plaud-poller
+PLAUD_OBSIDIAN_DIR=/srv/notes/Plaud
+```
+
 ## Manual run
 
 List recordings without writing artifacts:
@@ -58,31 +87,61 @@ Poll and write changed artifacts/notes:
 python3 -m plaud_poller.poll
 ```
 
-## Scheduling with Hermes cron
+Process only the first N visible recordings while testing:
+
+```bash
+python3 -m plaud_poller.poll --limit 5
+```
+
+## Scheduling examples
+
+### Hermes cron
 
 Use a script-only job so no LLM runs every poll:
 
 ```text
 schedule: every 10m
-script: /Users/so1omon/homelab/plaud-poller/scripts/run-poller.zsh
+script: /absolute/path/to/plaud-poller/scripts/run-poller.zsh
 no_agent: true
 ```
 
 The script is quiet when nothing changed. Non-zero exits should alert via Hermes cron.
 
-## Files
+### macOS launchd
 
-Default local data paths:
+Create a LaunchAgent that runs:
+
+```bash
+/path/to/plaud-poller/scripts/run-poller.zsh
+```
+
+Set the interval with `StartInterval` and make sure the launchd environment can find `python3`, or set `PYTHON_BIN` in the plist.
+
+### system cron
+
+```cron
+*/10 * * * * cd /path/to/plaud-poller && /usr/bin/python3 -m plaud_poller.poll
+```
+
+### systemd timer
+
+Use `WorkingDirectory=/path/to/plaud-poller` and `ExecStart=/usr/bin/python3 -m plaud_poller.poll`.
+
+## Output files
+
+With defaults:
 
 ```text
-~/Documents/Plaud/state.sqlite
-~/Documents/Plaud/recordings/<plaud_id>/metadata.json
-~/Documents/Plaud/recordings/<plaud_id>/transcript.json
-~/Documents/Plaud/recordings/<plaud_id>/transcript.md
-~/Documents/Plaud/recordings/<plaud_id>/summary.md
-~/Documents/Obsidian Vault/Plaud/YYYY-MM-DD - Title - <plaud_id>.md
+$PLAUD_DATA_DIR/state.sqlite
+$PLAUD_RECORDINGS_DIR/<plaud_id>/metadata.json
+$PLAUD_RECORDINGS_DIR/<plaud_id>/transcript.json
+$PLAUD_RECORDINGS_DIR/<plaud_id>/transcript.md
+$PLAUD_RECORDINGS_DIR/<plaud_id>/summary.md
+$PLAUD_OBSIDIAN_DIR/YYYY-MM-DD - Title - <plaud_id>.md
 ```
 
 ## Security
 
 Do not commit `.env`, SQLite state, recordings, transcripts, summaries, or audio.
+
+The public repository intentionally contains only code, examples, and documentation. Local credentials and synced PLAUD content belong in untracked paths.

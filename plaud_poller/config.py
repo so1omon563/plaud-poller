@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import os
+import sys
 
 REGION_API_BASES = {
     "aws:us-west-2": "https://api.plaud.ai",
@@ -10,6 +11,7 @@ REGION_API_BASES = {
     "aws:ap-southeast-1": "https://api-apse1.plaud.ai",
 }
 DEFAULT_REGION = "aws:us-west-2"
+APP_NAME = "plaud-poller"
 
 
 def load_dotenv(path: Path) -> None:
@@ -45,6 +47,27 @@ def truthy(value: str | None) -> bool:
     return bool(value and value.strip().lower() in {"1", "true", "yes", "on"})
 
 
+def expand_path(value: str) -> Path:
+    return Path(os.path.expandvars(value)).expanduser()
+
+
+def default_data_dir() -> Path:
+    """Return a platform-neutral default data directory.
+
+    Users should normally set PLAUD_DATA_DIR explicitly. This fallback avoids
+    embedding one maintainer's home directory in a public project.
+    """
+    if xdg := os.environ.get("XDG_DATA_HOME"):
+        return expand_path(xdg) / APP_NAME
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if base:
+            return expand_path(base) / APP_NAME
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+    return Path.home() / ".local" / "share" / APP_NAME
+
+
 def load_settings(repo_root: Path | None = None) -> Settings:
     root = repo_root or Path.cwd()
     load_dotenv(root / ".env")
@@ -56,18 +79,30 @@ def load_settings(repo_root: Path | None = None) -> Settings:
     if not authorization:
         raise SystemExit("Missing PLAUD_AUTHORIZATION or PLAUD_TOKEN in environment/.env")
 
-    data_dir = Path(os.environ.get("PLAUD_DATA_DIR", "~/Documents/Plaud")).expanduser()
-    obsidian_dir = Path(
-        os.environ.get("PLAUD_OBSIDIAN_DIR", "~/Documents/Obsidian Vault/Plaud")
-    ).expanduser()
-    recordings_dir = data_dir / "recordings"
+    data_dir = expand_path(os.environ["PLAUD_DATA_DIR"]) if os.environ.get("PLAUD_DATA_DIR") else default_data_dir()
+    recordings_dir = (
+        expand_path(os.environ["PLAUD_RECORDINGS_DIR"])
+        if os.environ.get("PLAUD_RECORDINGS_DIR")
+        else data_dir / "recordings"
+    )
+    obsidian_dir = (
+        expand_path(os.environ["PLAUD_OBSIDIAN_DIR"])
+        if os.environ.get("PLAUD_OBSIDIAN_DIR")
+        else data_dir / "obsidian-notes"
+    )
+    state_db = (
+        expand_path(os.environ["PLAUD_STATE_DB"])
+        if os.environ.get("PLAUD_STATE_DB")
+        else data_dir / "state.sqlite"
+    )
+
     return Settings(
         authorization=authorization,
         region=os.environ.get("PLAUD_REGION", DEFAULT_REGION).strip() or DEFAULT_REGION,
         data_dir=data_dir,
         recordings_dir=recordings_dir,
         obsidian_dir=obsidian_dir,
-        state_db=data_dir / "state.sqlite",
+        state_db=state_db,
         page_size=int(os.environ.get("PLAUD_PAGE_SIZE", "50")),
         download_audio=truthy(os.environ.get("PLAUD_DOWNLOAD_AUDIO")),
     )
