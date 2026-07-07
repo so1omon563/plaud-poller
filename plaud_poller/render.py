@@ -30,6 +30,18 @@ def flatten_transcript(segments: list[dict[str, Any]] | None) -> str:
     return "\n\n".join(lines)
 
 
+def flatten_outline(items: list[dict[str, Any]] | None) -> str:
+    if not items:
+        return ""
+    lines: list[str] = []
+    for item in items:
+        topic = item.get("topic") or item.get("title") or item.get("content") or item.get("text")
+        if not isinstance(topic, str) or not topic.strip():
+            continue
+        lines.append(f"- **{format_timestamp(item.get('start_time'))}** — {topic.strip()}")
+    return "\n".join(lines)
+
+
 def extract_summary_markdown(payload: Any) -> str | None:
     obj = payload
     if obj is None:
@@ -105,7 +117,9 @@ def render_obsidian_note(
     metadata: dict[str, Any],
     transcript_md: str,
     summary_md: str | None,
+    outline_md: str | None = None,
     include_transcript: bool = True,
+    include_outline: bool = False,
 ) -> str:
     """Render an Obsidian note with PLAUD as the canonical visible body.
 
@@ -125,6 +139,8 @@ def render_obsidian_note(
     body.extend(["---", ""])
     if summary_md:
         body.extend([summary_md.strip(), ""])
+    if include_outline and outline_md:
+        body.extend(["---", "", "## Outline", "", outline_md.strip(), ""])
     if include_transcript and transcript_md:
         body.extend(["---", "", "## Transcript", "", transcript_md.strip(), ""])
     return "\n".join(body).rstrip() + "\n"

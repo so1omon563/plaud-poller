@@ -15,6 +15,9 @@ HTML_META_RE = re.compile(r"\A<!--\s*plaud-poller:.*?-->\n?", re.DOTALL)
 def visible_body(markdown: str) -> str:
     body = FRONTMATTER_RE.sub("", markdown, count=1)
     body = HTML_META_RE.sub("", body, count=1)
+    for marker in ("\n---\n\n## Outline", "\n---\n\n## Transcript"):
+        if marker in body:
+            body = body.split(marker, 1)[0]
     return body.strip()
 
 
@@ -39,7 +42,7 @@ def run(argv: list[str] | None = None) -> int:
             continue
         detail = client.file_detail(rid)
         title = recording_title(row, detail)
-        _, summary = fetch_content_list_artifacts(client, detail.get("content_list"))
+        _, summary, _ = fetch_content_list_artifacts(client, detail.get("content_list"))
         note_path = resolve_note_path(settings.obsidian_dir, title, rid)
         checked += 1
         if not summary:

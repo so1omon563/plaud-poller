@@ -1,5 +1,5 @@
 from plaud_poller.poll import find_note_by_plaud_id, move_note, resolve_note_path, unique_destination
-from plaud_poller.render import extract_summary_markdown, flatten_transcript, render_obsidian_note, slug_filename, summary_from_transsumm
+from plaud_poller.render import extract_summary_markdown, flatten_outline, flatten_transcript, render_obsidian_note, slug_filename, summary_from_transsumm
 
 
 def test_extract_summary_markdown_shapes():
@@ -26,6 +26,15 @@ def test_flatten_transcript():
     assert "[01:05] B: World" in text
 
 
+def test_flatten_outline():
+    text = flatten_outline([
+        {"start_time": 0, "topic": "Kickoff"},
+        {"start_time": 61000, "topic": "Next steps"},
+    ])
+    assert "- **00:00** — Kickoff" in text
+    assert "- **01:01** — Next steps" in text
+
+
 def test_slug_filename():
     assert slug_filename('A/B:C*D?E"F<G>H|I') == "A B C D E F G H I"
 
@@ -38,16 +47,34 @@ def test_render_note_keeps_id_out_of_visible_date_fields():
         metadata={"start_time": 1783429242000, "duration": 123},
         transcript_md="Transcript",
         summary_md=summary,
+        outline_md="- **00:00** — Kickoff",
         include_transcript=False,
+        include_outline=False,
     )
     assert note.startswith("---\n")
     assert 'plaud_id: "abc123"' in note
     assert "recorded_date:" not in note
     assert "## Transcript" not in note
+    assert "## Outline" not in note
     assert "## Summary" not in note
     assert "# 2026-01-15 Product Review: Search Improvements" not in note
     visible = note.split("---", 2)[2].strip()
     assert visible == summary
+
+
+def test_render_note_can_include_outline():
+    note = render_obsidian_note(
+        plaud_id="abc123",
+        title="2026-01-15 Product Review: Search Improvements",
+        metadata={},
+        transcript_md="",
+        summary_md="Summary body",
+        outline_md="- **00:00** — Kickoff",
+        include_transcript=False,
+        include_outline=True,
+    )
+    assert "## Outline" in note
+    assert "- **00:00** — Kickoff" in note
 
 
 def test_resolve_note_path_hides_plaud_id(tmp_path):

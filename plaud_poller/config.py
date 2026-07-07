@@ -44,6 +44,7 @@ class Settings:
     trash_policy: str
     trash_archive_dir: Path
     note_include_transcript: bool
+    note_include_outline: bool
 
     @property
     def api_base(self) -> str:
@@ -136,4 +137,5 @@ def load_settings(repo_root: Path | None = None) -> Settings:
         trash_policy=trash_policy,
         trash_archive_dir=trash_archive_dir,
         note_include_transcript=truthy(os.environ.get("PLAUD_NOTE_INCLUDE_TRANSCRIPT", "true")),
+        note_include_outline=truthy(os.environ.get("PLAUD_NOTE_INCLUDE_OUTLINE")),
     )

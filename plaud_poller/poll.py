@@ -12,6 +12,7 @@ from .api import PlaudApiError, PlaudAuthError, PlaudClient, maybe_gunzip
 from .config import load_settings
 from .render import (
     extract_summary_markdown,
+    flatten_outline,
     flatten_transcript,
     render_obsidian_note,
     slug_filename,
@@ -212,7 +213,7 @@ def _payload_from_data_link(client: PlaudClient, url: str) -> Any:
 def fetch_content_list_artifacts(
     client: PlaudClient,
     content_list: Any,
-) -> tuple[list[dict[str, Any]] | None, str | None]:
+) -> tuple[list[dict[str, Any]] | None, str | None, list[dict[str, Any]] | None]:
     """Fetch transcript/summary blobs from PLAUD detail.content_list.
 
     PLAUD's `/ai/transsumm/{id}` response can lag behind speaker-name edits,
@@ -220,8 +221,9 @@ def fetch_content_list_artifacts(
     Prefer these blobs when present.
     """
     if not isinstance(content_list, list):
-        return None, None
+        return None, None, None
     transaction_url: str | None = None
+    outline_url: str | None = None
     auto_summary_url: str | None = None
     fallback_summary_url: str | None = None
     for item in content_list:
@@ -233,6 +235,8 @@ def fetch_content_list_artifacts(
             continue
         if data_type == "transaction" and not transaction_url:
             transaction_url = data_link
+        elif data_type == "outline" and not outline_url:
+            outline_url = data_link
         # PLAUD's auto_sum_note is the displayed summary. transaction_polish is
         # usually a polished transcript blob, not a summary, so don't prefer it.
         if data_type == "auto_sum_note" and not auto_summary_url:
@@ -244,6 +248,7 @@ def fetch_content_list_artifacts(
 
     segments: list[dict[str, Any]] | None = None
     summary_md: str | None = None
+    outline_items: list[dict[str, Any]] | None = None
     if transaction_url:
         parsed = _payload_from_data_link(client, transaction_url)
         raw_segments = parsed if isinstance(parsed, list) else list(parsed.values()) if isinstance(parsed, dict) else []
@@ -255,7 +260,11 @@ def fetch_content_list_artifacts(
         # Avoid treating transcript arrays as summaries.
         if extracted and not isinstance(parsed, list):
             summary_md = extracted
-    return segments, summary_md
+    if outline_url:
+        parsed = _payload_from_data_link(client, outline_url)
+        raw_outline = parsed if isinstance(parsed, list) else list(parsed.values()) if isinstance(parsed, dict) else []
+        outline_items = [item for item in raw_outline if isinstance(item, dict)]
+    return segments, summary_md, outline_items
 
 
 def process_recording(
@@ -267,6 +276,7 @@ def process_recording(
     obsidian_dir: Path,
     download_audio: bool,
     include_transcript: bool,
+    include_outline: bool,
     dry_run: bool,
 ) -> str | None:
     rid = recording_id(row)
@@ -277,17 +287,22 @@ def process_recording(
     title = recording_title(row, detail)
     transsumm: dict[str, Any] = {}
     transcript_segments: list[dict[str, Any]] | None = None
+    outline_items: list[dict[str, Any]] | None = None
     transcript_md = ""
+    outline_md = ""
     summary_md: str | None = None
 
     is_trans = bool(row.get("is_trans") or detail.get("is_trans"))
     is_summary = bool(row.get("is_summary") or detail.get("is_summary"))
     if is_trans or is_summary:
         try:
-            content_segments, content_summary_md = fetch_content_list_artifacts(client, detail.get("content_list"))
+            content_segments, content_summary_md, content_outline_items = fetch_content_list_artifacts(client, detail.get("content_list"))
             if content_segments is not None:
                 transcript_segments = content_segments
                 transcript_md = flatten_transcript(transcript_segments)
+            if content_outline_items is not None:
+                outline_items = content_outline_items
+                outline_md = flatten_outline(outline_items)
             if content_summary_md:
                 summary_md = content_summary_md
         except Exception as exc:
@@ -327,7 +342,9 @@ def process_recording(
         metadata=detail or row,
         transcript_md=transcript_md,
         summary_md=summary_md,
+        outline_md=outline_md,
         include_transcript=include_transcript,
+        include_outline=include_outline,
     )
     note_hash = sha256_text(note)
     old = state.get(rid)
@@ -352,6 +369,9 @@ def process_recording(
         write_text_if_changed(rec_dir / "transcript.md", transcript_md + ("\n" if transcript_md else ""))
     if summary_md:
         write_text_if_changed(rec_dir / "summary.md", summary_md.strip() + "\n")
+    if outline_items is not None:
+        write_text_if_changed(rec_dir / "outline.json", json.dumps(outline_items, ensure_ascii=False, indent=2) + "\n")
+        write_text_if_changed(rec_dir / "outline.md", outline_md + ("\n" if outline_md else ""))
 
     if download_audio and not audio_downloaded:
         try:
@@ -420,6 +440,7 @@ def run(argv: list[str] | None = None) -> int:
                 obsidian_dir=settings.obsidian_dir,
                 download_audio=settings.download_audio,
                 include_transcript=settings.note_include_transcript,
+                include_outline=settings.note_include_outline,
                 dry_run=args.dry_run,
             )
             if msg:

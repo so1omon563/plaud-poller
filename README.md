@@ -63,10 +63,11 @@ All paths are configurable by environment variables. Leave them blank to use por
 | `PLAUD_TRASH_POLICY` | What to do with notes whose PLAUD recording is no longer active: `keep`, `archive`, or `delete` | `archive` |
 | `PLAUD_TRASH_ARCHIVE_DIR` | Destination for archived removed/trashed notes | `$PLAUD_OBSIDIAN_DIR/_Archive/plaud-trash` |
 | `PLAUD_NOTE_INCLUDE_TRANSCRIPT` | Include full transcript text in generated Markdown notes | `true` |
+| `PLAUD_NOTE_INCLUDE_OUTLINE` | Include PLAUD outline as an extra Markdown section in generated notes | `false` |
 
 By default, only active PLAUD recordings are synced. If a previously synced recording later disappears from active PLAUD results, `PLAUD_TRASH_POLICY=archive` moves its Markdown note to the archive folder. Set `keep` to leave it in place, or `delete` to remove the Markdown note and local state row. Set `PLAUD_INCLUDE_TRASH=true` only if you intentionally want local copies of deleted/trashed PLAUD recordings.
 
-Transcript artifacts are always saved under `PLAUD_RECORDINGS_DIR` when available. Set `PLAUD_NOTE_INCLUDE_TRANSCRIPT=false` if you want generated Markdown notes to focus on PLAUD summaries while keeping transcripts available as local artifacts.
+Transcript and outline artifacts are always saved under `PLAUD_RECORDINGS_DIR` when available. Set `PLAUD_NOTE_INCLUDE_TRANSCRIPT=false` if you want generated Markdown notes to focus on PLAUD summaries while keeping transcripts available as local artifacts. Set `PLAUD_NOTE_INCLUDE_OUTLINE=true` if you want the PLAUD outline appended as a separate note section.
 
 Generated Markdown filenames use the PLAUD title only, for example:
 
@@ -161,6 +162,7 @@ It checks:
 - best-effort check that the vault is known to the local Obsidian app
 - active and trashed PLAUD recording counts
 - whether trash sync is enabled and which trash policy is active
+- whether transcript/outline sections are included in notes
 
 Installed CLI entrypoint:
 
@@ -241,6 +243,8 @@ $PLAUD_RECORDINGS_DIR/<plaud_id>/metadata.json
 $PLAUD_RECORDINGS_DIR/<plaud_id>/transcript.json
 $PLAUD_RECORDINGS_DIR/<plaud_id>/transcript.md
 $PLAUD_RECORDINGS_DIR/<plaud_id>/summary.md
+$PLAUD_RECORDINGS_DIR/<plaud_id>/outline.json
+$PLAUD_RECORDINGS_DIR/<plaud_id>/outline.md
 $PLAUD_OBSIDIAN_DIR/Title.md
 $PLAUD_OBSIDIAN_DIR/_Archive/plaud-trash/Title.md
 ```
