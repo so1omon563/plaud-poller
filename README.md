@@ -129,6 +129,31 @@ Process only the first N visible recordings while testing:
 python3 -m plaud_poller.poll --limit 5
 ```
 
+## Diagnostics
+
+Run the doctor command to verify token, paths, vault placement, and PLAUD API visibility without printing secrets:
+
+```bash
+python3 -m plaud_poller.doctor
+```
+
+It checks:
+
+- `.env` exists
+- token is present and valid
+- token expiry and PLAUD region
+- data/artifact/Markdown directories are writable
+- Markdown output is inside an Obsidian vault when applicable
+- best-effort check that the vault is known to the local Obsidian app
+- active and trashed PLAUD recording counts
+- whether trash sync is enabled
+
+Installed CLI entrypoint:
+
+```bash
+plaud-poller-doctor
+```
+
 ## Scheduling examples
 
 ### Hermes cron

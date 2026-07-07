@@ -12,6 +12,7 @@ dependencies = []
 [project.scripts]
 plaud-poller = "plaud_poller.poll:main"
 plaud-poller-auth = "plaud_poller.auth:main"
+plaud-poller-doctor = "plaud_poller.doctor:main"
 
 [tool.setuptools]
 packages = ["plaud_poller"]
