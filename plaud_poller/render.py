@@ -106,20 +106,25 @@ def render_obsidian_note(
     summary_md: str | None,
     include_transcript: bool = True,
 ) -> str:
+    """Render an Obsidian note with PLAUD as the canonical visible body.
+
+    The filename already supplies the Obsidian title, and PLAUD's summary blob
+    already includes its own title/date/template structure. Keep sync metadata
+    hidden in an HTML comment so Obsidian does not render local-only Properties
+    above the canonical PLAUD summary.
+    """
+    sync_meta = {
+        "source": "plaud",
+        "ingest": "plaud-poller",
+        "plaud_id": plaud_id,
+        "title": title,
+    }
     duration = metadata.get("duration")
-    escaped_title = title.replace('"', '\\"')
-    body = [
-        "---",
-        "source: plaud",
-        "ingest: plaud-poller",
-        f'plaud_id: "{plaud_id}"',
-        f'title: "{escaped_title}"',
-    ]
     if duration is not None:
-        body.append(f"duration_ms: {duration}")
-    body.extend(["---", "", f"# {title}", ""])
+        sync_meta["duration_ms"] = duration
+    body = [f"<!-- plaud-poller: {json.dumps(sync_meta, ensure_ascii=False, sort_keys=True)} -->", ""]
     if summary_md:
-        body.extend(["## Summary", "", summary_md.strip(), ""])
+        body.extend([summary_md.strip(), ""])
     if include_transcript and transcript_md:
-        body.extend(["## Transcript", "", transcript_md.strip(), ""])
+        body.extend(["---", "", "## Transcript", "", transcript_md.strip(), ""])
     return "\n".join(body).rstrip() + "\n"

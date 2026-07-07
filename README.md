@@ -72,7 +72,7 @@ Generated Markdown filenames use the PLAUD title only, for example:
 2026-01-15 Product Review Search Improvements.md
 ```
 
-The PLAUD ID is stored in frontmatter for idempotency, but is not included in the filename/title. The generated note also avoids adding its own visible date field; PLAUD's summary already includes the meeting date when PLAUD provides one.
+The PLAUD ID is stored in a hidden HTML comment for idempotency, but is not included in the filename/title or visible Obsidian Properties. The generated note avoids adding its own visible title/date/summary wrapper; PLAUD's summary body is treated as canonical.
 
 Example for Obsidian:
 

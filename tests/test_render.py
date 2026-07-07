@@ -31,23 +31,28 @@ def test_slug_filename():
 
 
 def test_render_note_keeps_id_out_of_visible_date_fields():
+    summary = "> Date: 2026-07-07 07:00:42\n> Participants: [Jed]"
     note = render_obsidian_note(
         plaud_id="abc123",
         title="2026-01-15 Product Review: Search Improvements",
         metadata={"start_time": 1783429242000, "duration": 123},
         transcript_md="Transcript",
-        summary_md="> Date: 2026-07-07 07:00:42\n> Participants: [Jed]",
+        summary_md=summary,
         include_transcript=False,
     )
-    assert 'plaud_id: "abc123"' in note
+    assert '<!-- plaud-poller:' in note
+    assert '"plaud_id": "abc123"' in note
     assert "recorded_date:" not in note
     assert "## Transcript" not in note
-    assert "# 2026-01-15 Product Review: Search Improvements" in note
+    assert "## Summary" not in note
+    assert "# 2026-01-15 Product Review: Search Improvements" not in note
+    visible = "\n".join(line for line in note.splitlines() if not line.startswith("<!-- plaud-poller:"))
+    assert visible.strip() == summary
 
 
 def test_resolve_note_path_hides_plaud_id(tmp_path):
     assert resolve_note_path(tmp_path, "2026-01-15 Product Review: Search Improvements", "abc123") == tmp_path / "2026-01-15 Product Review Search Improvements.md"
     existing = tmp_path / "2026-01-15 Product Review Search Improvements.md"
-    existing.write_text('---\nplaud_id: "other"\n---\n', encoding="utf-8")
+    existing.write_text('<!-- plaud-poller: {"plaud_id": "other"} -->\n', encoding="utf-8")
     assert resolve_note_path(tmp_path, "2026-01-15 Product Review: Search Improvements", "abc123") == tmp_path / "2026-01-15 Product Review Search Improvements (2).md"
     assert resolve_note_path(tmp_path, "2026-01-15 Product Review: Search Improvements", "other") == existing

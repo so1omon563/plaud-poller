@@ -53,7 +53,11 @@ def note_belongs_to_plaud_id(path: Path, rid: str) -> bool:
         head = path.read_text(encoding="utf-8")[:2000]
     except OSError:
         return False
-    return f'plaud_id: "{rid}"' in head or f"plaud_id: {rid}" in head
+    return (
+        f'plaud_id: "{rid}"' in head
+        or f"plaud_id: {rid}" in head
+        or f'"plaud_id": "{rid}"' in head
+    )
 
 
 def resolve_note_path(obsidian_dir: Path, title: str, rid: str) -> Path:
