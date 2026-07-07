@@ -7,10 +7,11 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from .api import PlaudApiError, PlaudAuthError, PlaudClient
+from .api import PlaudApiError, PlaudAuthError, PlaudClient, maybe_gunzip
 from .config import load_settings
 from .render import (
     date_from_start_time,
+    extract_summary_markdown,
     flatten_transcript,
     render_obsidian_note,
     slug_filename,
@@ -105,6 +106,51 @@ def stable_metadata_for_hash(row: dict[str, Any], detail: dict[str, Any]) -> dic
     return stable
 
 
+def _json_from_data_link(client: PlaudClient, url: str) -> Any:
+    raw = maybe_gunzip(client.fetch_presigned_bytes(url)).decode("utf-8", errors="replace")
+    return json.loads(raw)
+
+
+def fetch_content_list_artifacts(
+    client: PlaudClient,
+    content_list: Any,
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    """Fetch transcript/summary blobs from PLAUD detail.content_list.
+
+    PLAUD's `/ai/transsumm/{id}` response can lag behind speaker-name edits,
+    while the downloadable `transaction` blob reflects the updated transcript.
+    Prefer these blobs when present.
+    """
+    if not isinstance(content_list, list):
+        return None, None
+    transaction_url: str | None = None
+    summary_url: str | None = None
+    for item in content_list:
+        if not isinstance(item, dict):
+            continue
+        data_type = item.get("data_type")
+        data_link = item.get("data_link")
+        if not isinstance(data_link, str) or not data_link:
+            continue
+        if data_type == "transaction" and not transaction_url:
+            transaction_url = data_link
+        if data_type in {"auto_sum_note", "transaction_polish"} and not summary_url:
+            summary_url = data_link
+        if isinstance(data_type, str) and "sum" in data_type and not summary_url:
+            summary_url = data_link
+
+    segments: list[dict[str, Any]] | None = None
+    summary_md: str | None = None
+    if transaction_url:
+        parsed = _json_from_data_link(client, transaction_url)
+        raw_segments = parsed if isinstance(parsed, list) else list(parsed.values()) if isinstance(parsed, dict) else []
+        segments = [seg for seg in raw_segments if isinstance(seg, dict)]
+    if summary_url:
+        parsed = _json_from_data_link(client, summary_url)
+        summary_md = extract_summary_markdown(parsed)
+    return segments, summary_md
+
+
 def process_recording(
     *,
     client: PlaudClient,
@@ -130,15 +176,28 @@ def process_recording(
     is_summary = bool(row.get("is_summary") or detail.get("is_summary"))
     if is_trans or is_summary:
         try:
-            transsumm = client.transcript_and_summary(rid)
-            raw_segments = transsumm.get("data_result")
-            if isinstance(raw_segments, list):
-                transcript_segments = [x for x in raw_segments if isinstance(x, dict)]
+            content_segments, content_summary_md = fetch_content_list_artifacts(client, detail.get("content_list"))
+            if content_segments is not None:
+                transcript_segments = content_segments
                 transcript_md = flatten_transcript(transcript_segments)
-            summary_md = summary_from_transsumm(transsumm)
-        except PlaudApiError as exc:
-            # Keep metadata sync alive even if transcript endpoint is temporarily unavailable.
-            print(f"WARN {rid}: transcript/summary fetch failed: {exc}", file=sys.stderr)
+            if content_summary_md:
+                summary_md = content_summary_md
+        except Exception as exc:
+            print(f"WARN {rid}: content-list artifact fetch failed: {exc}", file=sys.stderr)
+
+        if transcript_segments is None or summary_md is None:
+            try:
+                transsumm = client.transcript_and_summary(rid)
+                if transcript_segments is None:
+                    raw_segments = transsumm.get("data_result")
+                    if isinstance(raw_segments, list):
+                        transcript_segments = [x for x in raw_segments if isinstance(x, dict)]
+                        transcript_md = flatten_transcript(transcript_segments)
+                if summary_md is None:
+                    summary_md = summary_from_transsumm(transsumm)
+            except PlaudApiError as exc:
+                # Keep metadata sync alive even if transcript endpoint is temporarily unavailable.
+                print(f"WARN {rid}: transcript/summary fetch failed: {exc}", file=sys.stderr)
 
     metadata = {
         "list_row": row,

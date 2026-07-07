@@ -23,6 +23,7 @@ Initial scaffold with:
 - Artifact writer.
 - Markdown renderer.
 - Dry-run/list-only mode.
+- Transcript/summary fetching from PLAUD downloadable content blobs when available, so speaker-name edits propagate.
 
 ## Setup
 
