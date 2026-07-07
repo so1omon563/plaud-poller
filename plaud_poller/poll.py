@@ -10,7 +10,6 @@ from typing import Any
 from .api import PlaudApiError, PlaudAuthError, PlaudClient, maybe_gunzip
 from .config import load_settings
 from .render import (
-    date_from_start_time,
     extract_summary_markdown,
     flatten_transcript,
     render_obsidian_note,
@@ -45,6 +44,33 @@ def write_bytes_if_missing(path: Path, content: bytes) -> bool:
         return False
     path.write_bytes(content)
     return True
+
+
+def note_belongs_to_plaud_id(path: Path, rid: str) -> bool:
+    if not path.exists():
+        return False
+    try:
+        head = path.read_text(encoding="utf-8")[:2000]
+    except OSError:
+        return False
+    return f'plaud_id: "{rid}"' in head or f"plaud_id: {rid}" in head
+
+
+def resolve_note_path(obsidian_dir: Path, title: str, rid: str) -> Path:
+    """Return a human-readable note path without exposing PLAUD IDs in the filename.
+
+    If two recordings have the same title, append a small numeric suffix rather
+    than the PLAUD ID. The ID stays in frontmatter for idempotency.
+    """
+    base = slug_filename(title)
+    candidate = obsidian_dir / f"{base}.md"
+    if not candidate.exists() or note_belongs_to_plaud_id(candidate, rid):
+        return candidate
+    for idx in range(2, 100):
+        candidate = obsidian_dir / f"{base} ({idx}).md"
+        if not candidate.exists() or note_belongs_to_plaud_id(candidate, rid):
+            return candidate
+    return obsidian_dir / f"{base} (duplicate).md"
 
 
 def recording_id(row: dict[str, Any]) -> str | None:
@@ -267,8 +293,7 @@ def process_recording(
         except PlaudApiError as exc:
             print(f"WARN {rid}: audio fetch failed: {exc}", file=sys.stderr)
 
-    note_name = f"{date_from_start_time((detail or row).get('start_time'))} - {slug_filename(title)} - {rid}.md"
-    note_path = obsidian_dir / note_name
+    note_path = resolve_note_path(obsidian_dir, title, rid)
     note_written = write_text_if_changed(note_path, note)
 
     state.upsert_seen(

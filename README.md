@@ -66,6 +66,14 @@ By default, only active PLAUD recordings are synced. Set `PLAUD_INCLUDE_TRASH=tr
 
 Transcript artifacts are always saved under `PLAUD_RECORDINGS_DIR` when available. Set `PLAUD_NOTE_INCLUDE_TRANSCRIPT=false` if you want generated Markdown notes to focus on PLAUD summaries while keeping transcripts available as local artifacts.
 
+Generated Markdown filenames use the PLAUD title only, for example:
+
+```text
+2026-01-15 Product Review Search Improvements.md
+```
+
+The PLAUD ID is stored in frontmatter for idempotency, but is not included in the filename/title. The generated note also avoids adding its own visible date field; PLAUD's summary already includes the meeting date when PLAUD provides one.
+
 Example for Obsidian:
 
 ```bash

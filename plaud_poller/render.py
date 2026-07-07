@@ -106,8 +106,6 @@ def render_obsidian_note(
     summary_md: str | None,
     include_transcript: bool = True,
 ) -> str:
-    start_time = metadata.get("start_time")
-    created = date_from_start_time(start_time)
     duration = metadata.get("duration")
     escaped_title = title.replace('"', '\\"')
     body = [
@@ -116,7 +114,6 @@ def render_obsidian_note(
         "ingest: plaud-poller",
         f'plaud_id: "{plaud_id}"',
         f'title: "{escaped_title}"',
-        f"recorded_date: {created}",
     ]
     if duration is not None:
         body.append(f"duration_ms: {duration}")
