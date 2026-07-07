@@ -63,6 +63,48 @@ def recording_title(row: dict[str, Any], detail: dict[str, Any] | None = None) -
     return "Untitled PLAUD Recording"
 
 
+def stable_metadata_for_hash(row: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
+    """Return only stable metadata fields for change detection.
+
+    PLAUD detail responses can include volatile pre-signed URLs and request/task
+    metadata. Hashing those makes every poll look like a change even when the
+    recording title/transcript/summary did not change.
+    """
+    stable_keys = {
+        "data_id",
+        "duration",
+        "edit_time",
+        "file_id",
+        "file_name",
+        "file_version",
+        "filetag_id_list",
+        "filetype",
+        "has_thought_partner",
+        "is_summary",
+        "is_trans",
+        "is_trash",
+        "scene",
+        "serial_number",
+        "session_id",
+        "start_time",
+    }
+    stable: dict[str, Any] = {}
+    for prefix, source in (("list", row), ("detail", detail)):
+        stable[prefix] = {key: source.get(key) for key in sorted(stable_keys) if key in source}
+    content_list = detail.get("content_list")
+    if isinstance(content_list, list):
+        stable["content_list"] = [
+            {
+                key: item.get(key)
+                for key in ("data_id", "data_type", "task_status", "err_code", "err_msg", "data_title", "data_tab_name")
+                if isinstance(item, dict) and key in item
+            }
+            for item in content_list
+            if isinstance(item, dict)
+        ]
+    return stable
+
+
 def process_recording(
     *,
     client: PlaudClient,
@@ -98,8 +140,16 @@ def process_recording(
             # Keep metadata sync alive even if transcript endpoint is temporarily unavailable.
             print(f"WARN {rid}: transcript/summary fetch failed: {exc}", file=sys.stderr)
 
-    metadata = {"list_row": row, "detail": detail, "transsumm_meta": {k: v for k, v in transsumm.items() if k not in {"data_result", "data_result_summ", "data_result_summ_mul"}}}
-    metadata_hash = sha256_text(stable_json(metadata)) or ""
+    metadata = {
+        "list_row": row,
+        "detail": detail,
+        "transsumm_meta": {
+            k: v
+            for k, v in transsumm.items()
+            if k not in {"data_result", "data_result_summ", "data_result_summ_mul"}
+        },
+    }
+    metadata_hash = sha256_text(stable_json(stable_metadata_for_hash(row, detail))) or ""
     transcript_hash = sha256_text(stable_json(transcript_segments)) if transcript_segments is not None else None
     summary_hash = sha256_text(summary_md) if summary_md else None
 
