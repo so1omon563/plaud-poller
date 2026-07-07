@@ -1,12 +1,17 @@
 from plaud_poller.poll import (
+    backup_note_before_overwrite,
     find_note_by_plaud_id,
     folder_names_from_filetags,
+    format_counts,
     move_note,
     resolve_note_path,
+    result_counts,
     speaker_names_from_segments,
+    SyncResult,
     tags_from_folders,
     unique_destination,
 )
+from plaud_poller.privacy import install_hook
 from plaud_poller.render import extract_summary_markdown, flatten_outline, flatten_transcript, obsidian_tag, render_obsidian_note, slug_filename, summary_from_transsumm
 
 
@@ -140,3 +145,37 @@ def test_unique_destination_adds_suffix(tmp_path):
     first = tmp_path / "Note.md"
     first.write_text("x", encoding="utf-8")
     assert unique_destination(first) == tmp_path / "Note (2).md"
+
+
+def test_result_counts_and_format():
+    counts = result_counts([
+        SyncResult("new"),
+        SyncResult("updated"),
+        SyncResult("updated"),
+        SyncResult("unchanged"),
+    ])
+    assert counts["new"] == 1
+    assert counts["updated"] == 2
+    assert counts["unchanged"] == 1
+    assert "updated=2" in format_counts(counts)
+
+
+def test_backup_note_before_overwrite(tmp_path):
+    note = tmp_path / "Note.md"
+    note.write_text("old", encoding="utf-8")
+    backup = backup_note_before_overwrite(note, tmp_path / "_Archive")
+    assert backup is not None
+    assert backup.exists()
+    assert backup.read_text(encoding="utf-8") == "old"
+    assert backup.parent == tmp_path / "_Archive"
+
+
+def test_install_privacy_hook(tmp_path):
+    repo = tmp_path / "repo"
+    hooks = repo / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    hook = install_hook(repo)
+    assert hook == hooks / "pre-commit"
+    assert hook.exists()
+    assert "plaud_poller.privacy" in hook.read_text(encoding="utf-8")
+    assert hook.stat().st_mode & 0o111

@@ -158,6 +158,9 @@ def run(argv: list[str] | None = None) -> int:
         checks.append(Check("include_trash", True, str(settings.include_trash).lower()))
         checks.append(Check("trash_policy", True, settings.trash_policy))
         checks.append(Check("trash_archive_dir", True, str(settings.trash_archive_dir)))
+        checks.append(Check("report_mode", True, settings.report_mode))
+        checks.append(Check("note_backup_on_change", True, str(settings.note_backup_on_change).lower()))
+        checks.append(Check("note_backup_dir", True, str(settings.note_backup_dir)))
         checks.append(Check("note_include_transcript", True, str(settings.note_include_transcript).lower()))
         checks.append(Check("note_include_outline", True, str(settings.note_include_outline).lower()))
     except Exception as exc:

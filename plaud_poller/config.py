@@ -43,6 +43,9 @@ class Settings:
     include_trash: bool
     trash_policy: str
     trash_archive_dir: Path
+    report_mode: str
+    note_backup_on_change: bool
+    note_backup_dir: Path
     note_include_transcript: bool
     note_include_outline: bool
 
@@ -118,6 +121,14 @@ def load_settings(repo_root: Path | None = None) -> Settings:
         if os.environ.get("PLAUD_TRASH_ARCHIVE_DIR")
         else obsidian_dir / "_Archive" / "plaud-trash"
     )
+    report_mode = os.environ.get("PLAUD_REPORT_MODE", "changes").strip().lower() or "changes"
+    if report_mode not in {"quiet", "changes", "summary", "verbose"}:
+        raise SystemExit("PLAUD_REPORT_MODE must be one of: quiet, changes, summary, verbose")
+    note_backup_dir = (
+        expand_path(os.environ["PLAUD_NOTE_BACKUP_DIR"])
+        if os.environ.get("PLAUD_NOTE_BACKUP_DIR")
+        else obsidian_dir / "_Archive" / "plaud-note-versions"
+    )
     state_db = (
         expand_path(os.environ["PLAUD_STATE_DB"])
         if os.environ.get("PLAUD_STATE_DB")
@@ -136,6 +147,9 @@ def load_settings(repo_root: Path | None = None) -> Settings:
         include_trash=truthy(os.environ.get("PLAUD_INCLUDE_TRASH")),
         trash_policy=trash_policy,
         trash_archive_dir=trash_archive_dir,
+        report_mode=report_mode,
+        note_backup_on_change=truthy(os.environ.get("PLAUD_NOTE_BACKUP_ON_CHANGE")),
+        note_backup_dir=note_backup_dir,
         note_include_transcript=truthy(os.environ.get("PLAUD_NOTE_INCLUDE_TRANSCRIPT", "true")),
         note_include_outline=truthy(os.environ.get("PLAUD_NOTE_INCLUDE_OUTLINE")),
     )

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -20,6 +22,12 @@ from .render import (
     summary_from_transsumm,
 )
 from .state import State
+
+
+@dataclass
+class SyncResult:
+    status: str
+    message: str | None = None
 
 
 def sha256_text(value: str | bytes | None) -> str | None:
@@ -47,6 +55,16 @@ def write_bytes_if_missing(path: Path, content: bytes) -> bool:
         return False
     path.write_bytes(content)
     return True
+
+
+def backup_note_before_overwrite(path: Path, backup_dir: Path) -> Path | None:
+    if not path.exists():
+        return None
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dest = unique_destination(backup_dir / f"{path.stem}__{stamp}{path.suffix}")
+    shutil.copy2(path, dest)
+    return dest
 
 
 def note_belongs_to_plaud_id(path: Path, rid: str) -> bool:
@@ -101,8 +119,8 @@ def reconcile_removed_recordings(
     trashed_ids: set[str],
     policy: str,
     dry_run: bool,
-) -> list[str]:
-    messages: list[str] = []
+) -> list[SyncResult]:
+    results: list[SyncResult] = []
     for rec in state.all_recordings():
         rid = str(rec.get("plaud_id") or "")
         if not rid or rid in visible_ids:
@@ -112,19 +130,43 @@ def reconcile_removed_recordings(
             continue
         reason = "trashed" if rid in trashed_ids else "missing"
         if policy == "keep":
+            results.append(SyncResult("kept", f"kept {reason} Plaud note: {rid[:8]}"))
             continue
         if dry_run:
-            messages.append(f"would {policy} {reason} Plaud note: {note_path}")
+            results.append(SyncResult(policy, f"would {policy} {reason} Plaud note: {rid[:8]}"))
             continue
         if policy == "archive":
             dest = move_note(note_path, archive_dir / note_path.name)
             state.touch_changed(rid)
-            messages.append(f"archived {reason} Plaud note: {dest}")
+            results.append(SyncResult("archived", f"archived {reason} Plaud note: {rid[:8]}"))
         elif policy == "delete":
             delete_note(note_path)
             state.remove(rid)
-            messages.append(f"deleted {reason} Plaud note: {note_path}")
-    return messages
+            results.append(SyncResult("deleted", f"deleted {reason} Plaud note: {rid[:8]}"))
+    return results
+
+
+def result_counts(results: list[SyncResult]) -> dict[str, int]:
+    keys = ["new", "updated", "renamed", "archived", "deleted", "unchanged", "kept", "skipped", "warn"]
+    counts = {key: 0 for key in keys}
+    for result in results:
+        counts[result.status] = counts.get(result.status, 0) + 1
+    return counts
+
+
+def format_counts(counts: dict[str, int]) -> str:
+    order = ["new", "updated", "renamed", "archived", "deleted", "unchanged", "kept", "skipped", "warn"]
+    return " ".join(f"{key}={counts.get(key, 0)}" for key in order)
+
+
+def should_print_result(result: SyncResult, report_mode: str) -> bool:
+    if not result.message:
+        return False
+    if report_mode == "quiet":
+        return False
+    if report_mode == "verbose":
+        return True
+    return result.status != "unchanged"
 
 
 def resolve_note_path(obsidian_dir: Path, title: str, rid: str) -> Path:
@@ -327,11 +369,13 @@ def process_recording(
     include_transcript: bool,
     include_outline: bool,
     filetags: dict[str, dict[str, Any]],
+    backup_on_change: bool,
+    backup_dir: Path,
     dry_run: bool,
-) -> str | None:
+) -> SyncResult:
     rid = recording_id(row)
     if not rid:
-        return "skipped row without recording id"
+        return SyncResult("skipped", "skipped row without recording id")
 
     detail = client.file_detail(rid)
     title = recording_title(row, detail)
@@ -416,8 +460,11 @@ def process_recording(
 
     audio_downloaded = bool(old and old.get("audio_downloaded"))
     if dry_run:
-        status = "NEW" if old is None else "CHANGED" if changed else "unchanged"
-        return f"{status} {rid} {title}"
+        if old is None:
+            return SyncResult("new", f"would create Plaud note: {rid[:8]}")
+        if changed:
+            return SyncResult("updated", f"would update Plaud note: {rid[:8]}")
+        return SyncResult("unchanged", f"unchanged Plaud note: {rid[:8]}")
 
     write_text_if_changed(rec_dir / "metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     if transcript_segments is not None:
@@ -442,9 +489,13 @@ def process_recording(
     existing_note_path = find_note_by_plaud_id(obsidian_dir, rid)
     renamed_note = False
     if not dry_run and existing_note_path and existing_note_path != note_path:
+        if backup_on_change:
+            backup_note_before_overwrite(existing_note_path, backup_dir)
         moved_to = move_note(existing_note_path, note_path)
         note_path = moved_to
         renamed_note = True
+    elif backup_on_change and note_path.exists() and note_path.read_text(encoding="utf-8") != note:
+        backup_note_before_overwrite(note_path, backup_dir)
     note_written = write_text_if_changed(note_path, note)
 
     state.upsert_seen(
@@ -460,18 +511,19 @@ def process_recording(
         changed=changed or note_written or renamed_note,
     )
     if old is None:
-        return f"new Plaud note: {note_path}"
+        return SyncResult("new", f"new Plaud note: {rid[:8]}")
     if renamed_note:
-        return f"renamed Plaud note: {note_path}"
+        return SyncResult("renamed", f"renamed Plaud note: {rid[:8]}")
     if changed or note_written:
-        return f"updated Plaud note: {note_path}"
-    return None
+        return SyncResult("updated", f"updated Plaud note: {rid[:8]}")
+    return SyncResult("unchanged", f"unchanged Plaud note: {rid[:8]}")
 
 
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Poll PLAUD and sync local artifacts/Obsidian notes")
     parser.add_argument("--dry-run", action="store_true", help="List recordings/status without writing artifacts")
     parser.add_argument("--limit", type=int, default=0, help="Process at most N recordings")
+    parser.add_argument("--report", choices=["quiet", "changes", "summary", "verbose"], default=None, help="Override PLAUD_REPORT_MODE for this run")
     args = parser.parse_args(argv)
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -486,10 +538,11 @@ def run(argv: list[str] | None = None) -> int:
         filetags = client.list_filetags()
         if args.limit:
             rows = rows[: args.limit]
+        report_mode = args.report or settings.report_mode
         visible_ids = {rid for row in rows if (rid := recording_id(row))}
-        messages: list[str] = []
+        results: list[SyncResult] = []
         for row in rows:
-            msg = process_recording(
+            result = process_recording(
                 client=client,
                 state=state,
                 row=row,
@@ -499,14 +552,15 @@ def run(argv: list[str] | None = None) -> int:
                 include_transcript=settings.note_include_transcript,
                 include_outline=settings.note_include_outline,
                 filetags=filetags,
+                backup_on_change=settings.note_backup_on_change,
+                backup_dir=settings.note_backup_dir,
                 dry_run=args.dry_run,
             )
-            if msg:
-                messages.append(msg)
+            results.append(result)
         if not args.limit and not settings.include_trash:
             trash_rows = client.list_all(page_size=settings.page_size, trash_mode=1)
             trashed_ids = {rid for row in trash_rows if (rid := recording_id(row))}
-            messages.extend(
+            results.extend(
                 reconcile_removed_recordings(
                     state=state,
                     obsidian_dir=settings.obsidian_dir,
@@ -517,10 +571,14 @@ def run(argv: list[str] | None = None) -> int:
                     dry_run=args.dry_run,
                 )
             )
-        if args.dry_run:
+        counts = result_counts(results)
+        if args.dry_run and report_mode != "quiet":
             print(f"Plaud recordings visible: {len(rows)}")
-        for msg in messages:
-            print(msg)
+        for result in results:
+            if should_print_result(result, report_mode):
+                print(result.message)
+        if report_mode == "summary" or (report_mode == "changes" and any(counts.get(key, 0) for key in ("new", "updated", "renamed", "archived", "deleted", "kept", "skipped", "warn"))):
+            print(format_counts(counts))
         return 0
     except PlaudAuthError as exc:
         print(f"AUTH ERROR: {exc}", file=sys.stderr)
