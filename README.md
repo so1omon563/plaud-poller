@@ -1,32 +1,70 @@
 # plaud-poller
 
-A small, deterministic PLAUD poller for syncing recordings, transcripts, and summaries to local disk and Markdown without Applaud, Zapier, or Google Sheets.
+`plaud-poller` is a local-first PLAUD sync tool for people who want their recordings, summaries, transcripts, and related metadata available as normal files and Markdown notes.
 
-The project was originally built to run from Hermes cron, but the poller itself is a normal Python CLI and can be run from cron, systemd, launchd, Docker, GitHub Actions/self-hosted runners, or manually.
+It polls PLAUD directly, stores raw artifacts on disk, and writes Markdown notes suitable for Obsidian or any folder-based Markdown workflow. It is designed to be deterministic and idempotent: repeated runs should be quiet when nothing changed, and PLAUD-side edits should be reflected locally without creating duplicate notes.
 
-## Goals
+This project is for users who want a simple, inspectable sync process instead of a cloud automation chain. It does not depend on Applaud, Zapier, Google Sheets, n8n, or any other hosted workflow system. You can run it manually, from cron, launchd, systemd, Docker, GitHub Actions/self-hosted runners, or Hermes cron.
 
-- Poll PLAUD directly on a schedule.
-- Store raw artifacts locally.
-- Render/update Markdown notes for Obsidian or any folder of Markdown files.
-- Re-fetch and hash transcript, summary, title, and metadata so PLAUD-side edits propagate.
-- Keep credentials local and out of git.
+## Why this exists
+
+PLAUD is useful as a capture and cleanup tool, but many users keep their long-term notes somewhere else: an Obsidian vault, a Markdown folder, a backup directory, or another local knowledge system.
+
+Existing automation paths tend to have tradeoffs:
+
+- they may depend on paid automation features,
+- they may not handle later edits made inside PLAUD,
+- they may make local file ownership unclear,
+- or they may introduce more moving parts than a personal notes workflow needs.
+
+`plaud-poller` takes the opposite approach: poll PLAUD, write files, keep state locally, and make the result easy to schedule and inspect.
+
+## Features
+
+- Poll PLAUD directly on demand or on a schedule.
+- Store raw recording artifacts locally.
+- Render and update Markdown notes for Obsidian or any Markdown directory.
+- Treat PLAUD as the source of truth for titles, summaries, transcripts, speaker labels, folders, and trash state.
+- Re-fetch and hash PLAUD content so title, summary, transcript, speaker, folder, and metadata changes propagate locally.
+- Use PLAUD titles for note filenames while keeping the PLAUD ID in frontmatter for idempotency.
+- Save transcript and outline artifacts even when generated notes are summary-only.
+- Optionally include transcript and outline sections in generated notes.
+- Convert PLAUD folders to Obsidian tags.
+- Convert PLAUD speaker labels to Obsidian wikilinks in frontmatter.
+- Reconcile renamed notes by PLAUD ID instead of leaving duplicates.
+- Archive, keep, or delete local notes whose PLAUD recordings are no longer active.
+- Optionally back up existing Obsidian notes before overwriting or renaming them.
+- Provide quiet, change-only, summary, and verbose reporting modes.
+- Provide diagnostics, canonical summary verification, and repository privacy checks.
+- Keep credentials and synced PLAUD content out of git.
 - Avoid hardcoded machine-specific paths.
 
-## Current status
+## Design principles
 
-Initial scaffold with:
+- **Local-first**: credentials, state, artifacts, and notes live on your machine.
+- **Deterministic**: the poller is a normal Python CLI, not a long-running service with hidden state.
+- **Idempotent**: repeated runs should not rewrite notes or print output when nothing changed.
+- **Simple to deploy**: run it manually or schedule the same command with cron, launchd, systemd, Docker, or Hermes cron.
+- **Markdown-friendly**: generated notes work well in Obsidian but do not require Obsidian.
+- **No cloud automation dependency**: no Zapier, Google Sheets, hosted workflow glue, or Applaud fork is required.
 
-- PLAUD API client using browser-like User-Agent.
-- Region auto-correction support for PLAUD regional API responses.
-- SQLite state DB.
-- Artifact writer.
-- Markdown renderer.
-- Dry-run/list-only mode.
-- Transcript/summary fetching from PLAUD downloadable content blobs when available, so speaker-name edits propagate.
-- PLAUD folder names become Obsidian tags, and PLAUD speaker labels become Obsidian wikilinks in frontmatter.
+## How it works
 
-## Setup
+On each run, `plaud-poller`:
+
+1. Loads configuration from the environment and `.env`.
+2. Authenticates to PLAUD using a bearer token.
+3. Lists active PLAUD recordings by default.
+4. Fetches recording detail, summary, transcript, outline, and folder metadata where available.
+5. Writes raw artifacts under the configured recordings directory.
+6. Renders or updates the Markdown note for each recording.
+7. Uses the PLAUD ID stored in frontmatter to detect existing notes, including notes whose PLAUD title changed.
+8. Reconciles notes for recordings that disappeared from active PLAUD results according to the configured trash policy.
+9. Updates a local SQLite state database so future runs can detect real changes.
+
+The generated note body treats PLAUD's displayed summary as canonical. Sync metadata stays in YAML frontmatter. Transcript and outline data are saved as artifacts and can optionally be included in the Markdown note.
+
+## Installation
 
 ```bash
 git clone https://github.com/so1omon563/plaud-poller.git
@@ -50,9 +88,9 @@ PLAUD_TOKEN='...'
 
 `PLAUD_AUTHORIZATION` wins when both are set.
 
-## Paths and portability
+## Configuration
 
-All paths are configurable by environment variables. Leave them blank to use portable defaults.
+All paths are configurable with environment variables. Leave path variables blank to use portable defaults.
 
 | Variable | Purpose | Default |
 |---|---|---|
@@ -69,24 +107,46 @@ All paths are configurable by environment variables. Leave them blank to use por
 | `PLAUD_NOTE_INCLUDE_TRANSCRIPT` | Include full transcript text in generated Markdown notes | `true` |
 | `PLAUD_NOTE_INCLUDE_OUTLINE` | Include PLAUD outline as an extra Markdown section in generated notes | `false` |
 
-By default, only active PLAUD recordings are synced. If a previously synced recording later disappears from active PLAUD results, `PLAUD_TRASH_POLICY=archive` moves its Markdown note to the archive folder. Set `keep` to leave it in place, or `delete` to remove the Markdown note and local state row. Set `PLAUD_INCLUDE_TRASH=true` only if you intentionally want local copies of deleted/trashed PLAUD recordings.
-
-Transcript and outline artifacts are always saved under `PLAUD_RECORDINGS_DIR` when available. Set `PLAUD_NOTE_INCLUDE_TRANSCRIPT=false` if you want generated Markdown notes to focus on PLAUD summaries while keeping transcripts available as local artifacts. Set `PLAUD_NOTE_INCLUDE_OUTLINE=true` if you want the PLAUD outline appended as a separate note section.
-
-Report modes:
-
-- `quiet` — no normal output, even when changes happen.
-- `changes` — quiet when unchanged; prints changed short PLAUD ids plus a summary when work happened.
-- `summary` — always prints counts such as `new=0 updated=1 renamed=0 archived=0 unchanged=2`.
-- `verbose` — prints per-record status, including unchanged records.
-
-For one-off manual runs, override the configured mode:
+Example for Obsidian:
 
 ```bash
-python3 -m plaud_poller.poll --report summary
+PLAUD_DATA_DIR=~/Documents/Plaud
+PLAUD_OBSIDIAN_DIR=~/Documents/Obsidian/Plaud
 ```
 
-If `PLAUD_NOTE_BACKUP_ON_CHANGE=true`, existing Obsidian notes are copied before overwrite/rename to `$PLAUD_NOTE_BACKUP_DIR`.
+Example for a server:
+
+```bash
+PLAUD_DATA_DIR=/var/lib/plaud-poller
+PLAUD_OBSIDIAN_DIR=/srv/notes/Plaud
+```
+
+### Trash handling
+
+By default, only active PLAUD recordings are synced. If a previously synced recording later disappears from active PLAUD results, `PLAUD_TRASH_POLICY=archive` moves its Markdown note to:
+
+```text
+$PLAUD_OBSIDIAN_DIR/_Archive/plaud-trash
+```
+
+Other policies are available:
+
+- `keep` — leave the note in place.
+- `archive` — move the note to the trash archive directory.
+- `delete` — remove the Markdown note and local state row.
+
+Set `PLAUD_INCLUDE_TRASH=true` only if you intentionally want local copies of deleted or trashed PLAUD recordings.
+
+### Note content
+
+Transcript and outline artifacts are always saved under `PLAUD_RECORDINGS_DIR` when available. Generated notes can include or omit those sections:
+
+```bash
+PLAUD_NOTE_INCLUDE_TRANSCRIPT=true
+PLAUD_NOTE_INCLUDE_OUTLINE=false
+```
+
+Set `PLAUD_NOTE_INCLUDE_TRANSCRIPT=false` if you want generated notes to focus on PLAUD summaries while keeping transcripts available as local artifacts. Set `PLAUD_NOTE_INCLUDE_OUTLINE=true` if you want the PLAUD outline appended as a separate note section.
 
 Generated Markdown filenames use the PLAUD title only, for example:
 
@@ -94,7 +154,7 @@ Generated Markdown filenames use the PLAUD title only, for example:
 2026-01-15 Product Review Search Improvements.md
 ```
 
-The PLAUD ID is stored in Obsidian/YAML frontmatter for idempotency, but is not included in the filename/title. The generated note avoids adding its own visible title/date/summary wrapper; PLAUD's summary body is treated as canonical.
+The PLAUD ID is stored in frontmatter for idempotency, but is not included in the filename or visible title. The generated note avoids adding its own visible title, date, or summary wrapper; PLAUD's summary body is treated as canonical.
 
 Generated frontmatter includes stable indexing metadata. PLAUD folders become Obsidian tags, and speaker labels come only from PLAUD transcript data, rendered as Obsidian links:
 
@@ -119,23 +179,44 @@ speakers:
 ---
 ```
 
-The poller does not keep a local speaker/person registry. Rename speakers in PLAUD; the next sync uses PLAUD's labels.
+The poller does not keep a local speaker or person registry. Rename speakers in PLAUD; the next sync uses PLAUD's labels.
 
-Example for Obsidian:
+### Report modes
+
+`PLAUD_REPORT_MODE` controls normal poll output:
+
+- `quiet` — no normal output, even when changes happen.
+- `changes` — quiet when unchanged; prints changed short PLAUD IDs plus a summary when work happened.
+- `summary` — always prints counts such as `new=0 updated=1 renamed=0 archived=0 unchanged=2`.
+- `verbose` — prints per-record status, including unchanged records.
+
+For one-off manual runs, override the configured mode:
 
 ```bash
-PLAUD_DATA_DIR=~/Documents/Plaud
-PLAUD_OBSIDIAN_DIR=~/Documents/Obsidian/Plaud
+python3 -m plaud_poller.poll --report summary
 ```
 
-Example for a server:
+### Note backups
 
-```bash
-PLAUD_DATA_DIR=/var/lib/plaud-poller
-PLAUD_OBSIDIAN_DIR=/srv/notes/Plaud
+If `PLAUD_NOTE_BACKUP_ON_CHANGE=true`, existing Obsidian notes are copied before overwrite or rename to:
+
+```text
+$PLAUD_NOTE_BACKUP_DIR
 ```
 
-## Auth helpers
+By default, that directory is:
+
+```text
+$PLAUD_OBSIDIAN_DIR/_Archive/plaud-note-versions
+```
+
+Backups use timestamped filenames such as:
+
+```text
+Title__YYYYMMDDTHHMMSSZ.md
+```
+
+## Authentication helpers
 
 The poller needs the same bearer token used by the PLAUD web app. You can paste it manually into `.env`, or use the helper to scan local Chromium-family browser profiles for a `web.plaud.ai` session token.
 
@@ -168,7 +249,7 @@ PLAUD_REFRESH_MIN_TTL_SECONDS=3600
 
 When enabled, the poller scans local Chromium-family browser storage before polling. If the `.env` token is missing, expired, or near expiry, and a valid browser token is found, `.env` is updated automatically. This is intended for personal machines where you stay logged into `https://web.plaud.ai/`. For servers and containers, prefer explicit token management.
 
-## Manual run
+## Usage
 
 List recordings without writing artifacts:
 
@@ -176,7 +257,7 @@ List recordings without writing artifacts:
 python3 -m plaud_poller.poll --dry-run
 ```
 
-Poll and write changed artifacts/notes:
+Poll and write changed artifacts and notes:
 
 ```bash
 python3 -m plaud_poller.poll
@@ -198,15 +279,16 @@ python3 -m plaud_poller.doctor
 
 It checks:
 
-- `.env` exists
-- token is present and valid
-- token expiry and PLAUD region
-- data/artifact/Markdown directories are writable
-- Markdown output is inside an Obsidian vault when applicable
-- best-effort check that the vault is known to the local Obsidian app
-- active and trashed PLAUD recording counts
-- whether trash sync is enabled and which trash policy is active
-- whether transcript/outline sections are included in notes
+- `.env` exists,
+- token is present and valid,
+- token expiry and PLAUD region,
+- data, artifact, and Markdown directories are writable,
+- Markdown output is inside an Obsidian vault when applicable,
+- best-effort check that the vault is known to the local Obsidian app,
+- active and trashed PLAUD recording counts,
+- whether trash sync is enabled and which trash policy is active,
+- report mode and note backup settings,
+- whether transcript and outline sections are included in notes.
 
 Installed CLI entrypoint:
 
@@ -214,7 +296,7 @@ Installed CLI entrypoint:
 plaud-poller-doctor
 ```
 
-## Verification and privacy checks
+### Verification and privacy checks
 
 Verify that the visible Obsidian body matches PLAUD's canonical `auto_sum_note` summary after removing frontmatter. Default output is summary-only to avoid printing private note titles; add `--verbose` when you want per-note filenames:
 
@@ -252,7 +334,9 @@ plaud-poller-verify
 plaud-poller-privacy-check
 ```
 
-## Scheduling examples
+## Scheduling
+
+The poller is a normal CLI. Schedule the same command or wrapper script with the system you already use.
 
 ### Hermes cron
 
@@ -286,7 +370,7 @@ Set the interval with `StartInterval` and make sure the launchd environment can 
 
 Use `WorkingDirectory=/path/to/plaud-poller` and `ExecStart=/usr/bin/python3 -m plaud_poller.poll`.
 
-## Output files
+## Output
 
 With defaults:
 
@@ -305,6 +389,8 @@ $PLAUD_OBSIDIAN_DIR/_Archive/plaud-note-versions/Title__YYYYMMDDTHHMMSSZ.md
 
 ## Security
 
-Do not commit `.env`, SQLite state, recordings, transcripts, summaries, or audio.
+Do not commit `.env`, SQLite state, recordings, transcripts, summaries, audio, or privacy denylist files.
 
 The public repository intentionally contains only code, examples, and documentation. Local credentials and synced PLAUD content belong in untracked paths.
+
+The authentication helper does not print token values. Diagnostic and verification commands are designed to avoid printing secrets, and default verification output avoids note filenames unless `--verbose` is requested.
