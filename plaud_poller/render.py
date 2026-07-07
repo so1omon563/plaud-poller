@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import re
+from datetime import datetime, timezone
+
 from typing import Any
 
 
@@ -108,21 +109,20 @@ def render_obsidian_note(
 ) -> str:
     """Render an Obsidian note with PLAUD as the canonical visible body.
 
-    The filename already supplies the Obsidian title, and PLAUD's summary blob
-    already includes its own title/date/template structure. Keep sync metadata
-    hidden in an HTML comment so Obsidian does not render local-only Properties
-    above the canonical PLAUD summary.
+    The filename supplies the Obsidian title, and PLAUD's summary blob supplies
+    the visible body. Keep poller sync metadata in Obsidian/YAML frontmatter
+    instead of an HTML comment.
     """
-    sync_meta = {
-        "source": "plaud",
-        "ingest": "plaud-poller",
-        "plaud_id": plaud_id,
-        "title": title,
-    }
     duration = metadata.get("duration")
+    body = [
+        "---",
+        "source: plaud",
+        "ingest: plaud-poller",
+        f'plaud_id: "{plaud_id}"',
+    ]
     if duration is not None:
-        sync_meta["duration_ms"] = duration
-    body = [f"<!-- plaud-poller: {json.dumps(sync_meta, ensure_ascii=False, sort_keys=True)} -->", ""]
+        body.append(f"duration_ms: {duration}")
+    body.extend(["---", ""])
     if summary_md:
         body.extend([summary_md.strip(), ""])
     if include_transcript and transcript_md:

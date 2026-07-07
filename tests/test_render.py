@@ -40,19 +40,19 @@ def test_render_note_keeps_id_out_of_visible_date_fields():
         summary_md=summary,
         include_transcript=False,
     )
-    assert '<!-- plaud-poller:' in note
-    assert '"plaud_id": "abc123"' in note
+    assert note.startswith("---\n")
+    assert 'plaud_id: "abc123"' in note
     assert "recorded_date:" not in note
     assert "## Transcript" not in note
     assert "## Summary" not in note
     assert "# 2026-01-15 Product Review: Search Improvements" not in note
-    visible = "\n".join(line for line in note.splitlines() if not line.startswith("<!-- plaud-poller:"))
-    assert visible.strip() == summary
+    visible = note.split("---", 2)[2].strip()
+    assert visible == summary
 
 
 def test_resolve_note_path_hides_plaud_id(tmp_path):
     assert resolve_note_path(tmp_path, "2026-01-15 Product Review: Search Improvements", "abc123") == tmp_path / "2026-01-15 Product Review Search Improvements.md"
     existing = tmp_path / "2026-01-15 Product Review Search Improvements.md"
-    existing.write_text('<!-- plaud-poller: {"plaud_id": "other"} -->\n', encoding="utf-8")
+    existing.write_text('---\nplaud_id: "other"\n---\n', encoding="utf-8")
     assert resolve_note_path(tmp_path, "2026-01-15 Product Review: Search Improvements", "abc123") == tmp_path / "2026-01-15 Product Review Search Improvements (2).md"
     assert resolve_note_path(tmp_path, "2026-01-15 Product Review: Search Improvements", "other") == existing
