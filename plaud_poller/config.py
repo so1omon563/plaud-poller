@@ -40,6 +40,7 @@ class Settings:
     state_db: Path
     page_size: int
     download_audio: bool
+    include_trash: bool
 
     @property
     def api_base(self) -> str:
@@ -120,4 +121,5 @@ def load_settings(repo_root: Path | None = None) -> Settings:
         state_db=state_db,
         page_size=int(os.environ.get("PLAUD_PAGE_SIZE", "50")),
         download_audio=truthy(os.environ.get("PLAUD_DOWNLOAD_AUDIO")),
+        include_trash=truthy(os.environ.get("PLAUD_INCLUDE_TRASH")),
     )

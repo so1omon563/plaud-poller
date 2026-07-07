@@ -58,6 +58,9 @@ All paths are configurable by environment variables. Leave them blank to use por
 | `PLAUD_RECORDINGS_DIR` | Raw recording artifact directory | `$PLAUD_DATA_DIR/recordings` |
 | `PLAUD_STATE_DB` | SQLite state database path | `$PLAUD_DATA_DIR/state.sqlite` |
 | `PLAUD_OBSIDIAN_DIR` | Markdown output directory | `$PLAUD_DATA_DIR/obsidian-notes` |
+| `PLAUD_INCLUDE_TRASH` | Also sync recordings in PLAUD trash | `false` |
+
+By default, only active PLAUD recordings are synced. Set `PLAUD_INCLUDE_TRASH=true` only if you intentionally want local copies of deleted/trashed PLAUD recordings.
 
 Example for Obsidian:
 

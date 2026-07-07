@@ -231,7 +231,7 @@ def run(argv: list[str] | None = None) -> int:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         settings.recordings_dir.mkdir(parents=True, exist_ok=True)
         settings.obsidian_dir.mkdir(parents=True, exist_ok=True)
-        rows = client.list_all(page_size=settings.page_size)
+        rows = client.list_all(page_size=settings.page_size, include_trash=settings.include_trash)
         if args.limit:
             rows = rows[: args.limit]
         messages: list[str] = []

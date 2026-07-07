@@ -106,12 +106,16 @@ class PlaudClient:
                     continue
         raise PlaudApiError(f"Network error after retries: {last}")
 
-    def list_recordings(self, *, skip: int = 0, limit: int = 50) -> list[dict[str, Any]]:
+    def list_recordings(self, *, skip: int = 0, limit: int = 50, include_trash: bool = False) -> list[dict[str, Any]]:
         query = urlencode(
             {
                 "skip": skip,
                 "limit": limit,
-                "is_trash": 2,
+                # PLAUD values observed:
+                #   0 = active recordings only
+                #   1 = trash only
+                #   2 = active + trash
+                "is_trash": 2 if include_trash else 0,
                 "sort_by": "start_time",
                 "is_desc": "true",
             }
@@ -119,11 +123,17 @@ class PlaudClient:
         data = self.request_json(f"/file/simple/web?{query}")
         return list(data.get("data_file_list") or [])
 
-    def list_all(self, *, page_size: int = 50, max_pages: int = 200) -> list[dict[str, Any]]:
+    def list_all(
+        self,
+        *,
+        page_size: int = 50,
+        max_pages: int = 200,
+        include_trash: bool = False,
+    ) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         skip = 0
         for _ in range(max_pages):
-            page = self.list_recordings(skip=skip, limit=page_size)
+            page = self.list_recordings(skip=skip, limit=page_size, include_trash=include_trash)
             if not page:
                 break
             out.extend(page)
