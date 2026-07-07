@@ -1,25 +1,31 @@
 # plaud-poller
 
-`plaud-poller` is a local-first PLAUD sync tool for people who want their recordings, summaries, transcripts, and related metadata available as normal files and Markdown notes.
+`plaud-poller` is a local-first synchronization tool that mirrors PLAUD recordings, summaries, transcripts, outlines, and metadata to ordinary files and Markdown notes.
 
-It polls PLAUD directly, stores raw artifacts on disk, and writes Markdown notes suitable for Obsidian or any folder-based Markdown workflow. It is designed to be deterministic and idempotent: repeated runs should be quiet when nothing changed, and PLAUD-side edits should be reflected locally without creating duplicate notes.
+PLAUD remains the place to capture and clean up recordings. Your filesystem becomes the long-term home for the data. The poller keeps those two views aligned by writing local artifacts and Markdown notes suitable for Obsidian or any folder-based Markdown workflow.
 
-This project is for users who want a simple, inspectable sync process instead of a cloud automation chain. It does not depend on Applaud, Zapier, Google Sheets, n8n, or any other hosted workflow system. You can run it manually, from cron, launchd, systemd, Docker, GitHub Actions/self-hosted runners, or Hermes cron.
+It is designed to be deterministic and idempotent: repeated runs should be quiet when nothing changed, and PLAUD-side edits should be reflected locally without creating duplicate notes. It is for users who want a simple, inspectable sync process instead of a cloud automation chain. It does not depend on Applaud, Zapier, Google Sheets, n8n, or any other hosted workflow system.
+
+```text
+PLAUD
+  │
+  ▼
+plaud-poller
+  ├── artifacts
+  └── Markdown notes
+```
 
 ## Why this exists
 
-PLAUD is useful as a capture and cleanup tool, but many users keep their long-term notes somewhere else: an Obsidian vault, a Markdown folder, a backup directory, or another local knowledge system.
+PLAUD is the capture tool. Your filesystem is the long-term home. `plaud-poller` keeps the two synchronized without putting a cloud automation service in the middle.
 
-Existing automation paths tend to have tradeoffs:
+That matters when recordings are edited after capture. Titles, summaries, speaker labels, folders, and trash state can change inside PLAUD; the local Markdown view should follow those changes without losing inspectability or creating duplicate notes.
 
-- they may depend on paid automation features,
-- they may not handle later edits made inside PLAUD,
-- they may make local file ownership unclear,
-- or they may introduce more moving parts than a personal notes workflow needs.
-
-`plaud-poller` takes the opposite approach: poll PLAUD, write files, keep state locally, and make the result easy to schedule and inspect.
+The project favors plain files, local state, and scheduled runs over hosted workflow glue. The result is easy to inspect, easy to back up, and under your control.
 
 ## Features
+
+### Core features
 
 - Poll PLAUD directly on demand or on a schedule.
 - Store raw recording artifacts locally.
@@ -29,6 +35,9 @@ Existing automation paths tend to have tradeoffs:
 - Use PLAUD titles for note filenames while keeping the PLAUD ID in frontmatter for idempotency.
 - Save transcript and outline artifacts even when generated notes are summary-only.
 - Optionally include transcript and outline sections in generated notes.
+
+### Additional capabilities
+
 - Convert PLAUD folders to Obsidian tags.
 - Convert PLAUD speaker labels to Obsidian wikilinks in frontmatter.
 - Reconcile renamed notes by PLAUD ID instead of leaving duplicates.
