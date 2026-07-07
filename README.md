@@ -60,8 +60,11 @@ All paths are configurable by environment variables. Leave them blank to use por
 | `PLAUD_STATE_DB` | SQLite state database path | `$PLAUD_DATA_DIR/state.sqlite` |
 | `PLAUD_OBSIDIAN_DIR` | Markdown output directory | `$PLAUD_DATA_DIR/obsidian-notes` |
 | `PLAUD_INCLUDE_TRASH` | Also sync recordings in PLAUD trash | `false` |
+| `PLAUD_NOTE_INCLUDE_TRANSCRIPT` | Include full transcript text in generated Markdown notes | `true` |
 
 By default, only active PLAUD recordings are synced. Set `PLAUD_INCLUDE_TRASH=true` only if you intentionally want local copies of deleted/trashed PLAUD recordings.
+
+Transcript artifacts are always saved under `PLAUD_RECORDINGS_DIR` when available. Set `PLAUD_NOTE_INCLUDE_TRANSCRIPT=false` if you want generated Markdown notes to focus on PLAUD summaries while keeping transcripts available as local artifacts.
 
 Example for Obsidian:
 

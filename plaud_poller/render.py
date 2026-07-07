@@ -104,6 +104,7 @@ def render_obsidian_note(
     metadata: dict[str, Any],
     transcript_md: str,
     summary_md: str | None,
+    include_transcript: bool = True,
 ) -> str:
     start_time = metadata.get("start_time")
     created = date_from_start_time(start_time)
@@ -122,6 +123,6 @@ def render_obsidian_note(
     body.extend(["---", "", f"# {title}", ""])
     if summary_md:
         body.extend(["## Summary", "", summary_md.strip(), ""])
-    if transcript_md:
+    if include_transcript and transcript_md:
         body.extend(["## Transcript", "", transcript_md.strip(), ""])
     return "\n".join(body).rstrip() + "\n"

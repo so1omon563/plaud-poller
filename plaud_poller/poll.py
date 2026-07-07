@@ -106,9 +106,12 @@ def stable_metadata_for_hash(row: dict[str, Any], detail: dict[str, Any]) -> dic
     return stable
 
 
-def _json_from_data_link(client: PlaudClient, url: str) -> Any:
+def _payload_from_data_link(client: PlaudClient, url: str) -> Any:
     raw = maybe_gunzip(client.fetch_presigned_bytes(url)).decode("utf-8", errors="replace")
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
 
 
 def fetch_content_list_artifacts(
@@ -124,7 +127,8 @@ def fetch_content_list_artifacts(
     if not isinstance(content_list, list):
         return None, None
     transaction_url: str | None = None
-    summary_url: str | None = None
+    auto_summary_url: str | None = None
+    fallback_summary_url: str | None = None
     for item in content_list:
         if not isinstance(item, dict):
             continue
@@ -134,20 +138,28 @@ def fetch_content_list_artifacts(
             continue
         if data_type == "transaction" and not transaction_url:
             transaction_url = data_link
-        if data_type in {"auto_sum_note", "transaction_polish"} and not summary_url:
-            summary_url = data_link
-        if isinstance(data_type, str) and "sum" in data_type and not summary_url:
-            summary_url = data_link
+        # PLAUD's auto_sum_note is the displayed summary. transaction_polish is
+        # usually a polished transcript blob, not a summary, so don't prefer it.
+        if data_type == "auto_sum_note" and not auto_summary_url:
+            auto_summary_url = data_link
+        elif isinstance(data_type, str) and "sum" in data_type and not fallback_summary_url:
+            fallback_summary_url = data_link
+        elif data_type == "transaction_polish" and not fallback_summary_url:
+            fallback_summary_url = data_link
 
     segments: list[dict[str, Any]] | None = None
     summary_md: str | None = None
     if transaction_url:
-        parsed = _json_from_data_link(client, transaction_url)
+        parsed = _payload_from_data_link(client, transaction_url)
         raw_segments = parsed if isinstance(parsed, list) else list(parsed.values()) if isinstance(parsed, dict) else []
         segments = [seg for seg in raw_segments if isinstance(seg, dict)]
+    summary_url = auto_summary_url or fallback_summary_url
     if summary_url:
-        parsed = _json_from_data_link(client, summary_url)
-        summary_md = extract_summary_markdown(parsed)
+        parsed = _payload_from_data_link(client, summary_url)
+        extracted = extract_summary_markdown(parsed)
+        # Avoid treating transcript arrays as summaries.
+        if extracted and not isinstance(parsed, list):
+            summary_md = extracted
     return segments, summary_md
 
 
@@ -159,6 +171,7 @@ def process_recording(
     data_dir: Path,
     obsidian_dir: Path,
     download_audio: bool,
+    include_transcript: bool,
     dry_run: bool,
 ) -> str | None:
     rid = recording_id(row)
@@ -219,6 +232,7 @@ def process_recording(
         metadata=detail or row,
         transcript_md=transcript_md,
         summary_md=summary_md,
+        include_transcript=include_transcript,
     )
     note_hash = sha256_text(note)
     old = state.get(rid)
@@ -302,6 +316,7 @@ def run(argv: list[str] | None = None) -> int:
                 data_dir=settings.data_dir,
                 obsidian_dir=settings.obsidian_dir,
                 download_audio=settings.download_audio,
+                include_transcript=settings.note_include_transcript,
                 dry_run=args.dry_run,
             )
             if msg:

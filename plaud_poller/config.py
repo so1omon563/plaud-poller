@@ -41,6 +41,7 @@ class Settings:
     page_size: int
     download_audio: bool
     include_trash: bool
+    note_include_transcript: bool
 
     @property
     def api_base(self) -> str:
@@ -122,4 +123,5 @@ def load_settings(repo_root: Path | None = None) -> Settings:
         page_size=int(os.environ.get("PLAUD_PAGE_SIZE", "50")),
         download_audio=truthy(os.environ.get("PLAUD_DOWNLOAD_AUDIO")),
         include_trash=truthy(os.environ.get("PLAUD_INCLUDE_TRASH")),
+        note_include_transcript=truthy(os.environ.get("PLAUD_NOTE_INCLUDE_TRANSCRIPT", "true")),
     )
