@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plaud-poller"
+version = "0.1.0"
+description = "Local PLAUD poller for Obsidian sync"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+plaud-poller = "plaud_poller.poll:main"
+
+[tool.setuptools]
+packages = ["plaud_poller"]
