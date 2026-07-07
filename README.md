@@ -24,6 +24,7 @@ Initial scaffold with:
 - Markdown renderer.
 - Dry-run/list-only mode.
 - Transcript/summary fetching from PLAUD downloadable content blobs when available, so speaker-name edits propagate.
+- PLAUD folder names become Obsidian tags, and PLAUD speaker labels become Obsidian wikilinks in frontmatter.
 
 ## Setup
 
@@ -76,6 +77,31 @@ Generated Markdown filenames use the PLAUD title only, for example:
 ```
 
 The PLAUD ID is stored in Obsidian/YAML frontmatter for idempotency, but is not included in the filename/title. The generated note avoids adding its own visible title/date/summary wrapper; PLAUD's summary body is treated as canonical.
+
+Generated frontmatter includes stable indexing metadata. PLAUD folders become Obsidian tags, and speaker labels come only from PLAUD transcript data, rendered as Obsidian links:
+
+```yaml
+---
+source: plaud
+ingest: plaud-poller
+plaud_id: "..."
+title: "2026-01-15 Product Review Search Improvements"
+duration_ms: 1234567
+plaud_updated_at: "2026-01-15T17:30:00Z"
+has_summary: true
+has_transcript: true
+has_outline: true
+tags:
+  - "work"
+plaud_folders:
+  - "Work"
+speakers:
+  - "[[Jane Example]]"
+  - "[[Sam Example]]"
+---
+```
+
+The poller does not keep a local speaker/person registry. Rename speakers in PLAUD; the next sync uses PLAUD's labels.
 
 Example for Obsidian:
 
@@ -172,10 +198,11 @@ plaud-poller-doctor
 
 ## Verification and privacy checks
 
-Verify that the visible Obsidian body matches PLAUD's canonical `auto_sum_note` summary after removing frontmatter:
+Verify that the visible Obsidian body matches PLAUD's canonical `auto_sum_note` summary after removing frontmatter. Default output is summary-only to avoid printing private note titles; add `--verbose` when you want per-note filenames:
 
 ```bash
 python3 -m plaud_poller.verify
+python3 -m plaud_poller.verify --verbose
 ```
 
 Scan tracked repository files for caller-provided private terms before committing:

@@ -1,5 +1,13 @@
-from plaud_poller.poll import find_note_by_plaud_id, move_note, resolve_note_path, unique_destination
-from plaud_poller.render import extract_summary_markdown, flatten_outline, flatten_transcript, render_obsidian_note, slug_filename, summary_from_transsumm
+from plaud_poller.poll import (
+    find_note_by_plaud_id,
+    folder_names_from_filetags,
+    move_note,
+    resolve_note_path,
+    speaker_names_from_segments,
+    tags_from_folders,
+    unique_destination,
+)
+from plaud_poller.render import extract_summary_markdown, flatten_outline, flatten_transcript, obsidian_tag, render_obsidian_note, slug_filename, summary_from_transsumm
 
 
 def test_extract_summary_markdown_shapes():
@@ -39,20 +47,53 @@ def test_slug_filename():
     assert slug_filename('A/B:C*D?E"F<G>H|I') == "A B C D E F G H I"
 
 
+def test_obsidian_tag_from_plaud_folder():
+    assert obsidian_tag("Work") == "work"
+    assert obsidian_tag("Client Meetings") == "client-meetings"
+    assert tags_from_folders(["Work", "Client Meetings", "Work"]) == ["work", "client-meetings"]
+
+
+def test_folder_names_from_filetags():
+    row = {"filetag_id_list": ["folder-1"]}
+    detail = {"filetag_id_list": ["folder-1", "folder-2"]}
+    filetags = {"folder-1": {"name": "Work"}, "folder-2": {"name": "Research"}}
+    assert folder_names_from_filetags(row, detail, filetags) == ["Work", "Research"]
+
+
+def test_speaker_names_from_segments_uses_plaud_labels():
+    speakers = speaker_names_from_segments([
+        {"speaker": "Jane Doe", "content": "Hello"},
+        {"speaker": "Jane Doe", "content": "Again"},
+        {"original_speaker": "Sam Example", "content": "Hi"},
+    ])
+    assert speakers == ["Jane Doe", "Sam Example"]
+
+
 def test_render_note_keeps_id_out_of_visible_date_fields():
     summary = "> Date: 2026-07-07 07:00:42\n> Participants: [Jed]"
     note = render_obsidian_note(
         plaud_id="abc123",
         title="2026-01-15 Product Review: Search Improvements",
-        metadata={"start_time": 1783429242000, "duration": 123},
+        metadata={"start_time": 1783429242000, "duration": 123, "edit_time": 1783429300000},
         transcript_md="Transcript",
         summary_md=summary,
         outline_md="- **00:00** — Kickoff",
+        folder_names=["Work"],
+        speakers=["Jane Doe", "Sam Example"],
+        tags=["work"],
         include_transcript=False,
         include_outline=False,
     )
     assert note.startswith("---\n")
     assert 'plaud_id: "abc123"' in note
+    assert 'title: "2026-01-15 Product Review: Search Improvements"' in note
+    assert "plaud_updated_at:" in note
+    assert "has_summary: true" in note
+    assert "has_transcript: true" in note
+    assert "has_outline: true" in note
+    assert "tags:\n  - \"work\"" in note
+    assert "plaud_folders:\n  - \"Work\"" in note
+    assert "speakers:\n  - \"[[Jane Doe]]\"\n  - \"[[Sam Example]]\"" in note
     assert "recorded_date:" not in note
     assert "## Transcript" not in note
     assert "## Outline" not in note

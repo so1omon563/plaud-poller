@@ -151,6 +151,22 @@ class PlaudClient:
             skip += page_size
         return out
 
+    def list_filetags(self) -> dict[str, dict[str, Any]]:
+        """Return PLAUD folder/tag metadata keyed by tag id.
+
+        PLAUD represents folders on recordings as `filetag_id_list`; the web API
+        resolves those ids through `/filetag/`.
+        """
+        data = self.request_json("/filetag/")
+        tags: dict[str, dict[str, Any]] = {}
+        for item in data.get("data_filetag_list") or []:
+            if not isinstance(item, dict):
+                continue
+            tag_id = item.get("id")
+            if isinstance(tag_id, str) and tag_id:
+                tags[tag_id] = item
+        return tags
+
     def file_detail(self, recording_id: str) -> dict[str, Any]:
         data = self.request_json(f"/file/detail/{recording_id}")
         return dict(data.get("data") or {})

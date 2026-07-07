@@ -14,6 +14,7 @@ from .render import (
     extract_summary_markdown,
     flatten_outline,
     flatten_transcript,
+    obsidian_tag,
     render_obsidian_note,
     slug_filename,
     summary_from_transsumm,
@@ -160,6 +161,54 @@ def recording_title(row: dict[str, Any], detail: dict[str, Any] | None = None) -
     return "Untitled PLAUD Recording"
 
 
+def unique_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        cleaned = value.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        out.append(cleaned)
+    return out
+
+
+def folder_names_from_filetags(
+    row: dict[str, Any],
+    detail: dict[str, Any],
+    filetags: dict[str, dict[str, Any]],
+) -> list[str]:
+    ids: list[str] = []
+    for source in (detail, row):
+        raw_ids = source.get("filetag_id_list")
+        if isinstance(raw_ids, list):
+            ids.extend(str(tag_id) for tag_id in raw_ids if tag_id)
+    names: list[str] = []
+    for tag_id in unique_strings(ids):
+        tag = filetags.get(tag_id) or {}
+        name = tag.get("name")
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+    return unique_strings(names)
+
+
+def tags_from_folders(folder_names: list[str]) -> list[str]:
+    return unique_strings([tag for folder in folder_names if (tag := obsidian_tag(folder))])
+
+
+def speaker_names_from_segments(segments: list[dict[str, Any]] | None) -> list[str]:
+    if not segments:
+        return []
+    names: list[str] = []
+    for seg in segments:
+        for key in ("speaker", "original_speaker"):
+            value = seg.get(key)
+            if isinstance(value, str) and value.strip():
+                names.append(value.strip())
+                break
+    return unique_strings(names)
+
+
 def stable_metadata_for_hash(row: dict[str, Any], detail: dict[str, Any]) -> dict[str, Any]:
     """Return only stable metadata fields for change detection.
 
@@ -277,6 +326,7 @@ def process_recording(
     download_audio: bool,
     include_transcript: bool,
     include_outline: bool,
+    filetags: dict[str, dict[str, Any]],
     dry_run: bool,
 ) -> str | None:
     rid = recording_id(row)
@@ -334,6 +384,9 @@ def process_recording(
     metadata_hash = sha256_text(stable_json(stable_metadata_for_hash(row, detail))) or ""
     transcript_hash = sha256_text(stable_json(transcript_segments)) if transcript_segments is not None else None
     summary_hash = sha256_text(summary_md) if summary_md else None
+    folder_names = folder_names_from_filetags(row, detail, filetags)
+    folder_tags = tags_from_folders(folder_names)
+    speakers = speaker_names_from_segments(transcript_segments)
 
     rec_dir = data_dir / "recordings" / rid
     note = render_obsidian_note(
@@ -343,6 +396,9 @@ def process_recording(
         transcript_md=transcript_md,
         summary_md=summary_md,
         outline_md=outline_md,
+        folder_names=folder_names,
+        speakers=speakers,
+        tags=folder_tags,
         include_transcript=include_transcript,
         include_outline=include_outline,
     )
@@ -427,6 +483,7 @@ def run(argv: list[str] | None = None) -> int:
         settings.recordings_dir.mkdir(parents=True, exist_ok=True)
         settings.obsidian_dir.mkdir(parents=True, exist_ok=True)
         rows = client.list_all(page_size=settings.page_size, include_trash=settings.include_trash)
+        filetags = client.list_filetags()
         if args.limit:
             rows = rows[: args.limit]
         visible_ids = {rid for row in rows if (rid := recording_id(row))}
@@ -441,6 +498,7 @@ def run(argv: list[str] | None = None) -> int:
                 download_audio=settings.download_audio,
                 include_transcript=settings.note_include_transcript,
                 include_outline=settings.note_include_outline,
+                filetags=filetags,
                 dry_run=args.dry_run,
             )
             if msg:

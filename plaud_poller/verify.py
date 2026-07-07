@@ -25,6 +25,7 @@ def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify Obsidian visible bodies match PLAUD canonical summaries")
     parser.add_argument("--repo-root", default=None, help="Repository/config directory containing .env")
     parser.add_argument("--limit", type=int, default=0, help="Verify at most N recordings")
+    parser.add_argument("--verbose", action="store_true", help="Print per-note filenames/results")
     args = parser.parse_args(argv)
 
     repo_root = Path(args.repo_root).expanduser().resolve() if args.repo_root else Path.cwd()
@@ -50,11 +51,14 @@ def run(argv: list[str] | None = None) -> int:
             continue
         if not note_path.exists():
             failures += 1
-            print(f"FAIL {rid[:8]} note missing: {note_path}")
+            print(f"FAIL {rid[:8]} note missing")
+            if args.verbose:
+                print(f"missing_path={note_path}")
             continue
         local = visible_body(note_path.read_text(encoding="utf-8"))
         ok = local == summary.strip()
-        print(f"{'ok' if ok else 'FAIL'} {rid[:8]} {note_path.name}")
+        if args.verbose or not ok:
+            print(f"{'ok' if ok else 'FAIL'} {rid[:8]}" + (f" {note_path.name}" if args.verbose else ""))
         if not ok:
             failures += 1
     print(f"checked={checked} failures={failures}")

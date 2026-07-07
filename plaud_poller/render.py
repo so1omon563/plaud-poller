@@ -110,6 +110,40 @@ def date_from_start_time(start_time: int | float | None) -> str:
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
 
 
+def iso_from_plaud_time(value: int | float | None) -> str | None:
+    if not value:
+        return None
+    ts = float(value)
+    if ts > 10_000_000_000:
+        ts /= 1000
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def yaml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def append_yaml_list(lines: list[str], key: str, values: list[str]) -> None:
+    if not values:
+        return
+    lines.append(f"{key}:")
+    for value in values:
+        lines.append(f"  - {yaml_scalar(value)}")
+
+
+def obsidian_tag(value: str) -> str:
+    cleaned = value.strip().lower()
+    cleaned = re.sub(r"[^a-z0-9/_-]+", "-", cleaned)
+    cleaned = re.sub(r"-+", "-", cleaned).strip("-/")
+    return cleaned
+
+
 def render_obsidian_note(
     *,
     plaud_id: str,
@@ -118,24 +152,41 @@ def render_obsidian_note(
     transcript_md: str,
     summary_md: str | None,
     outline_md: str | None = None,
+    folder_names: list[str] | None = None,
+    speakers: list[str] | None = None,
+    tags: list[str] | None = None,
     include_transcript: bool = True,
     include_outline: bool = False,
 ) -> str:
     """Render an Obsidian note with PLAUD as the canonical visible body.
 
     The filename supplies the Obsidian title, and PLAUD's summary blob supplies
-    the visible body. Keep poller sync metadata in Obsidian/YAML frontmatter
-    instead of an HTML comment.
+    the visible body. Keep sync/indexing metadata in stable YAML frontmatter;
+    do not include volatile sync timestamps that would break idempotency.
     """
     duration = metadata.get("duration")
+    folder_names = folder_names or []
+    speakers = speakers or []
+    tags = tags or []
+    speaker_links = [f"[[{speaker}]]" for speaker in speakers]
     body = [
         "---",
         "source: plaud",
         "ingest: plaud-poller",
         f'plaud_id: "{plaud_id}"',
+        f"title: {yaml_scalar(title)}",
     ]
     if duration is not None:
         body.append(f"duration_ms: {duration}")
+    plaud_updated_at = iso_from_plaud_time(metadata.get("edit_time") or metadata.get("version_ms"))
+    if plaud_updated_at:
+        body.append(f"plaud_updated_at: {yaml_scalar(plaud_updated_at)}")
+    body.append(f"has_summary: {yaml_scalar(bool(summary_md))}")
+    body.append(f"has_transcript: {yaml_scalar(bool(transcript_md))}")
+    body.append(f"has_outline: {yaml_scalar(bool(outline_md))}")
+    append_yaml_list(body, "tags", tags)
+    append_yaml_list(body, "plaud_folders", folder_names)
+    append_yaml_list(body, "speakers", speaker_links)
     body.extend(["---", ""])
     if summary_md:
         body.extend([summary_md.strip(), ""])
