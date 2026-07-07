@@ -73,6 +73,39 @@ PLAUD_DATA_DIR=/var/lib/plaud-poller
 PLAUD_OBSIDIAN_DIR=/srv/notes/Plaud
 ```
 
+## Auth helpers
+
+The poller needs the same bearer token used by the PLAUD web app. You can paste it manually into `.env`, or use the helper to scan local Chromium-family browser profiles for a `web.plaud.ai` session token.
+
+Detect valid browser tokens without printing secrets:
+
+```bash
+python3 -m plaud_poller.auth detect
+```
+
+Write a detected valid token to `.env`:
+
+```bash
+python3 -m plaud_poller.auth refresh --env .env
+```
+
+Force replacement even if the current `.env` token still has time left:
+
+```bash
+python3 -m plaud_poller.auth refresh --env .env --force
+```
+
+The helper prints token metadata only, such as browser/profile, region, and expiry. It never prints the token value.
+
+Optional auto-refresh before every poll:
+
+```bash
+PLAUD_AUTO_REFRESH_TOKEN=true
+PLAUD_REFRESH_MIN_TTL_SECONDS=3600
+```
+
+When enabled, the poller scans local Chromium-family browser storage before polling. If the `.env` token is missing, expired, or near expiry, and a valid browser token is found, `.env` is updated automatically. This is intended for personal machines where you stay logged into `https://web.plaud.ai/`. For servers and containers, prefer explicit token management.
+
 ## Manual run
 
 List recordings without writing artifacts:

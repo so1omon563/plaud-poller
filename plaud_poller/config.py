@@ -14,7 +14,7 @@ DEFAULT_REGION = "aws:us-west-2"
 APP_NAME = "plaud-poller"
 
 
-def load_dotenv(path: Path) -> None:
+def load_dotenv(path: Path, *, override: bool = False) -> None:
     if not path.exists():
         return
     for raw in path.read_text(encoding="utf-8").splitlines():
@@ -24,7 +24,10 @@ def load_dotenv(path: Path) -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
+        if override:
+            os.environ[key] = value
+        else:
+            os.environ.setdefault(key, value)
 
 
 @dataclass(frozen=True)
@@ -70,7 +73,19 @@ def default_data_dir() -> Path:
 
 def load_settings(repo_root: Path | None = None) -> Settings:
     root = repo_root or Path.cwd()
-    load_dotenv(root / ".env")
+    env_path = root / ".env"
+    load_dotenv(env_path)
+
+    if truthy(os.environ.get("PLAUD_AUTO_REFRESH_TOKEN")):
+        from .auth import refresh_env_token
+
+        changed, _ = refresh_env_token(
+            env_path,
+            min_ttl_seconds=int(os.environ.get("PLAUD_REFRESH_MIN_TTL_SECONDS", "3600")),
+        )
+        if changed:
+            # Refresh process writes .env; update this process too.
+            load_dotenv(env_path, override=True)
 
     authorization = os.environ.get("PLAUD_AUTHORIZATION", "").strip()
     token = os.environ.get("PLAUD_TOKEN", "").strip()
