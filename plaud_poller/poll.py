@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import sys
 from typing import Any
 
@@ -54,6 +55,74 @@ def note_belongs_to_plaud_id(path: Path, rid: str) -> bool:
     except OSError:
         return False
     return f'plaud_id: "{rid}"' in head or f"plaud_id: {rid}" in head or f'"plaud_id": "{rid}"' in head
+
+
+def find_note_by_plaud_id(obsidian_dir: Path, rid: str) -> Path | None:
+    if not obsidian_dir.exists():
+        return None
+    for path in sorted(obsidian_dir.glob("*.md")):
+        if note_belongs_to_plaud_id(path, rid):
+            return path
+    return None
+
+
+def unique_destination(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for idx in range(2, 1000):
+        candidate = path.with_name(f"{path.stem} ({idx}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+    return path.with_name(f"{path.stem} (duplicate){path.suffix}")
+
+
+def move_note(src: Path, dst: Path) -> Path:
+    dst = unique_destination(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+    return dst
+
+
+def delete_note(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def reconcile_removed_recordings(
+    *,
+    state: State,
+    obsidian_dir: Path,
+    archive_dir: Path,
+    visible_ids: set[str],
+    trashed_ids: set[str],
+    policy: str,
+    dry_run: bool,
+) -> list[str]:
+    messages: list[str] = []
+    for rec in state.all_recordings():
+        rid = str(rec.get("plaud_id") or "")
+        if not rid or rid in visible_ids:
+            continue
+        note_path = find_note_by_plaud_id(obsidian_dir, rid)
+        if note_path is None:
+            continue
+        reason = "trashed" if rid in trashed_ids else "missing"
+        if policy == "keep":
+            continue
+        if dry_run:
+            messages.append(f"would {policy} {reason} Plaud note: {note_path}")
+            continue
+        if policy == "archive":
+            dest = move_note(note_path, archive_dir / note_path.name)
+            state.touch_changed(rid)
+            messages.append(f"archived {reason} Plaud note: {dest}")
+        elif policy == "delete":
+            delete_note(note_path)
+            state.remove(rid)
+            messages.append(f"deleted {reason} Plaud note: {note_path}")
+    return messages
 
 
 def resolve_note_path(obsidian_dir: Path, title: str, rid: str) -> Path:
@@ -294,6 +363,12 @@ def process_recording(
             print(f"WARN {rid}: audio fetch failed: {exc}", file=sys.stderr)
 
     note_path = resolve_note_path(obsidian_dir, title, rid)
+    existing_note_path = find_note_by_plaud_id(obsidian_dir, rid)
+    renamed_note = False
+    if not dry_run and existing_note_path and existing_note_path != note_path:
+        moved_to = move_note(existing_note_path, note_path)
+        note_path = moved_to
+        renamed_note = True
     note_written = write_text_if_changed(note_path, note)
 
     state.upsert_seen(
@@ -306,10 +381,12 @@ def process_recording(
         summary_hash=summary_hash,
         note_hash=note_hash,
         audio_downloaded=audio_downloaded,
-        changed=changed or note_written,
+        changed=changed or note_written or renamed_note,
     )
     if old is None:
         return f"new Plaud note: {note_path}"
+    if renamed_note:
+        return f"renamed Plaud note: {note_path}"
     if changed or note_written:
         return f"updated Plaud note: {note_path}"
     return None
@@ -332,6 +409,7 @@ def run(argv: list[str] | None = None) -> int:
         rows = client.list_all(page_size=settings.page_size, include_trash=settings.include_trash)
         if args.limit:
             rows = rows[: args.limit]
+        visible_ids = {rid for row in rows if (rid := recording_id(row))}
         messages: list[str] = []
         for row in rows:
             msg = process_recording(
@@ -346,6 +424,20 @@ def run(argv: list[str] | None = None) -> int:
             )
             if msg:
                 messages.append(msg)
+        if not args.limit and not settings.include_trash:
+            trash_rows = client.list_all(page_size=settings.page_size, trash_mode=1)
+            trashed_ids = {rid for row in trash_rows if (rid := recording_id(row))}
+            messages.extend(
+                reconcile_removed_recordings(
+                    state=state,
+                    obsidian_dir=settings.obsidian_dir,
+                    archive_dir=settings.trash_archive_dir,
+                    visible_ids=visible_ids,
+                    trashed_ids=trashed_ids,
+                    policy=settings.trash_policy,
+                    dry_run=args.dry_run,
+                )
+            )
         if args.dry_run:
             print(f"Plaud recordings visible: {len(rows)}")
         for msg in messages:

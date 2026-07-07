@@ -13,6 +13,8 @@ dependencies = []
 plaud-poller = "plaud_poller.poll:main"
 plaud-poller-auth = "plaud_poller.auth:main"
 plaud-poller-doctor = "plaud_poller.doctor:main"
+plaud-poller-privacy-check = "plaud_poller.privacy:main"
+plaud-poller-verify = "plaud_poller.verify:main"
 
 [tool.setuptools]
 packages = ["plaud_poller"]

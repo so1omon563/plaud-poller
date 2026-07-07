@@ -1,4 +1,5 @@
 .env
+.plaud-privacy-denylist
 *.sqlite
 *.sqlite-*
 __pycache__/

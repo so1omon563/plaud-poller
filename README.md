@@ -60,9 +60,11 @@ All paths are configurable by environment variables. Leave them blank to use por
 | `PLAUD_STATE_DB` | SQLite state database path | `$PLAUD_DATA_DIR/state.sqlite` |
 | `PLAUD_OBSIDIAN_DIR` | Markdown output directory | `$PLAUD_DATA_DIR/obsidian-notes` |
 | `PLAUD_INCLUDE_TRASH` | Also sync recordings in PLAUD trash | `false` |
+| `PLAUD_TRASH_POLICY` | What to do with notes whose PLAUD recording is no longer active: `keep`, `archive`, or `delete` | `archive` |
+| `PLAUD_TRASH_ARCHIVE_DIR` | Destination for archived removed/trashed notes | `$PLAUD_OBSIDIAN_DIR/_Archive/plaud-trash` |
 | `PLAUD_NOTE_INCLUDE_TRANSCRIPT` | Include full transcript text in generated Markdown notes | `true` |
 
-By default, only active PLAUD recordings are synced. Set `PLAUD_INCLUDE_TRASH=true` only if you intentionally want local copies of deleted/trashed PLAUD recordings.
+By default, only active PLAUD recordings are synced. If a previously synced recording later disappears from active PLAUD results, `PLAUD_TRASH_POLICY=archive` moves its Markdown note to the archive folder. Set `keep` to leave it in place, or `delete` to remove the Markdown note and local state row. Set `PLAUD_INCLUDE_TRASH=true` only if you intentionally want local copies of deleted/trashed PLAUD recordings.
 
 Transcript artifacts are always saved under `PLAUD_RECORDINGS_DIR` when available. Set `PLAUD_NOTE_INCLUDE_TRANSCRIPT=false` if you want generated Markdown notes to focus on PLAUD summaries while keeping transcripts available as local artifacts.
 
@@ -72,7 +74,7 @@ Generated Markdown filenames use the PLAUD title only, for example:
 2026-01-15 Product Review Search Improvements.md
 ```
 
-The PLAUD ID is stored in a hidden HTML comment for idempotency, but is not included in the filename/title or visible Obsidian Properties. The generated note avoids adding its own visible title/date/summary wrapper; PLAUD's summary body is treated as canonical.
+The PLAUD ID is stored in Obsidian/YAML frontmatter for idempotency, but is not included in the filename/title. The generated note avoids adding its own visible title/date/summary wrapper; PLAUD's summary body is treated as canonical.
 
 Example for Obsidian:
 
@@ -158,12 +160,41 @@ It checks:
 - Markdown output is inside an Obsidian vault when applicable
 - best-effort check that the vault is known to the local Obsidian app
 - active and trashed PLAUD recording counts
-- whether trash sync is enabled
+- whether trash sync is enabled and which trash policy is active
 
 Installed CLI entrypoint:
 
 ```bash
 plaud-poller-doctor
+```
+
+## Verification and privacy checks
+
+Verify that the visible Obsidian body matches PLAUD's canonical `auto_sum_note` summary after removing frontmatter:
+
+```bash
+python3 -m plaud_poller.verify
+```
+
+Scan tracked repository files for caller-provided private terms before committing:
+
+```bash
+# Optional local file, ignored by git:
+$EDITOR .plaud-privacy-denylist
+python3 -m plaud_poller.privacy
+```
+
+You can also pass terms directly for CI or one-off checks:
+
+```bash
+python3 -m plaud_poller.privacy --term "Private Customer Name" --term "Internal Meeting Title"
+```
+
+Installed CLI entrypoints:
+
+```bash
+plaud-poller-verify
+plaud-poller-privacy-check
 ```
 
 ## Scheduling examples
@@ -210,7 +241,8 @@ $PLAUD_RECORDINGS_DIR/<plaud_id>/metadata.json
 $PLAUD_RECORDINGS_DIR/<plaud_id>/transcript.json
 $PLAUD_RECORDINGS_DIR/<plaud_id>/transcript.md
 $PLAUD_RECORDINGS_DIR/<plaud_id>/summary.md
-$PLAUD_OBSIDIAN_DIR/YYYY-MM-DD - Title - <plaud_id>.md
+$PLAUD_OBSIDIAN_DIR/Title.md
+$PLAUD_OBSIDIAN_DIR/_Archive/plaud-trash/Title.md
 ```
 
 ## Security

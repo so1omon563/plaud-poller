@@ -1,4 +1,4 @@
-from plaud_poller.poll import resolve_note_path
+from plaud_poller.poll import find_note_by_plaud_id, move_note, resolve_note_path, unique_destination
 from plaud_poller.render import extract_summary_markdown, flatten_transcript, render_obsidian_note, slug_filename, summary_from_transsumm
 
 
@@ -56,3 +56,19 @@ def test_resolve_note_path_hides_plaud_id(tmp_path):
     existing.write_text('---\nplaud_id: "other"\n---\n', encoding="utf-8")
     assert resolve_note_path(tmp_path, "2026-01-15 Product Review: Search Improvements", "abc123") == tmp_path / "2026-01-15 Product Review Search Improvements (2).md"
     assert resolve_note_path(tmp_path, "2026-01-15 Product Review: Search Improvements", "other") == existing
+
+
+def test_find_and_move_note_by_plaud_id(tmp_path):
+    old = tmp_path / "Old Title.md"
+    old.write_text('---\nplaud_id: "abc123"\n---\nbody\n', encoding="utf-8")
+    assert find_note_by_plaud_id(tmp_path, "abc123") == old
+    moved = move_note(old, tmp_path / "New Title.md")
+    assert moved == tmp_path / "New Title.md"
+    assert not old.exists()
+    assert moved.exists()
+
+
+def test_unique_destination_adds_suffix(tmp_path):
+    first = tmp_path / "Note.md"
+    first.write_text("x", encoding="utf-8")
+    assert unique_destination(first) == tmp_path / "Note (2).md"

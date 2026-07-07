@@ -41,6 +41,8 @@ class Settings:
     page_size: int
     download_audio: bool
     include_trash: bool
+    trash_policy: str
+    trash_archive_dir: Path
     note_include_transcript: bool
 
     @property
@@ -107,6 +109,14 @@ def load_settings(repo_root: Path | None = None) -> Settings:
         if os.environ.get("PLAUD_OBSIDIAN_DIR")
         else data_dir / "obsidian-notes"
     )
+    trash_policy = os.environ.get("PLAUD_TRASH_POLICY", "archive").strip().lower() or "archive"
+    if trash_policy not in {"keep", "archive", "delete"}:
+        raise SystemExit("PLAUD_TRASH_POLICY must be one of: keep, archive, delete")
+    trash_archive_dir = (
+        expand_path(os.environ["PLAUD_TRASH_ARCHIVE_DIR"])
+        if os.environ.get("PLAUD_TRASH_ARCHIVE_DIR")
+        else obsidian_dir / "_Archive" / "plaud-trash"
+    )
     state_db = (
         expand_path(os.environ["PLAUD_STATE_DB"])
         if os.environ.get("PLAUD_STATE_DB")
@@ -123,5 +133,7 @@ def load_settings(repo_root: Path | None = None) -> Settings:
         page_size=int(os.environ.get("PLAUD_PAGE_SIZE", "50")),
         download_audio=truthy(os.environ.get("PLAUD_DOWNLOAD_AUDIO")),
         include_trash=truthy(os.environ.get("PLAUD_INCLUDE_TRASH")),
+        trash_policy=trash_policy,
+        trash_archive_dir=trash_archive_dir,
         note_include_transcript=truthy(os.environ.get("PLAUD_NOTE_INCLUDE_TRANSCRIPT", "true")),
     )

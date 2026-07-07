@@ -39,6 +39,22 @@ class State:
         row = self.conn.execute("select * from recordings where plaud_id = ?", (plaud_id,)).fetchone()
         return dict(row) if row else None
 
+    def all_recordings(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute("select * from recordings order by last_seen_at desc").fetchall()
+        return [dict(row) for row in rows]
+
+    def remove(self, plaud_id: str) -> None:
+        self.conn.execute("delete from recordings where plaud_id = ?", (plaud_id,))
+        self.conn.commit()
+
+    def touch_changed(self, plaud_id: str) -> None:
+        now = utc_now()
+        self.conn.execute(
+            "update recordings set last_changed_at = ? where plaud_id = ?",
+            (now, plaud_id),
+        )
+        self.conn.commit()
+
     def upsert_seen(
         self,
         plaud_id: str,

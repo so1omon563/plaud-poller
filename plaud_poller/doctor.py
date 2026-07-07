@@ -156,6 +156,8 @@ def run(argv: list[str] | None = None) -> int:
         checks.append(Check("plaud_active_recordings", True, str(active_count)))
         checks.append(Check("plaud_trash_recordings", True, str(trash_count)))
         checks.append(Check("include_trash", True, str(settings.include_trash).lower()))
+        checks.append(Check("trash_policy", True, settings.trash_policy))
+        checks.append(Check("trash_archive_dir", True, str(settings.trash_archive_dir)))
         checks.append(Check("note_include_transcript", True, str(settings.note_include_transcript).lower()))
     except Exception as exc:
         checks.append(Check("plaud_api", False, str(exc)))
