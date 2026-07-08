@@ -282,7 +282,7 @@ PLAUD_AUTO_REFRESH_TOKEN=true
 PLAUD_REFRESH_MIN_TTL_SECONDS=3600
 ```
 
-When enabled, the poller scans local Chromium-family browser storage before polling. If the `.env` token is missing, expired, or near expiry, and a valid browser token is found, `.env` is updated automatically. This is intended for personal machines where you stay logged into `https://web.plaud.ai/`. For servers and containers, prefer explicit token management.
+When enabled, the poller scans local Chromium-family browser storage before polling. If the `.env` token is missing, expired, or near expiry, and a valid browser token is found, `.env` is updated automatically. If PLAUD rejects a still-unexpired token during polling, the poller also attempts one forced browser-session refresh and retries the API request before failing. This is intended for personal machines where you stay logged into `https://web.plaud.ai/`. For servers and containers, prefer explicit token management.
 
 ## Usage
 

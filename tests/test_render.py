@@ -13,6 +13,7 @@ from plaud_poller.poll import (
     move_note,
     preserve_existing_image_link_styles,
     preserve_existing_task_states,
+    refresh_after_auth_error,
     resolve_note_path,
     result_counts,
     speaker_names_from_segments,
@@ -313,6 +314,20 @@ def test_plaud_status_token_expired_raises_auth_error():
         assert "token expired" in str(exc)
     else:
         raise AssertionError("expired PLAUD status should raise PlaudAuthError")
+
+
+def test_refresh_after_auth_error_respects_auto_refresh_flag(tmp_path):
+    old = os.environ.get("PLAUD_AUTO_REFRESH_TOKEN")
+    try:
+        os.environ.pop("PLAUD_AUTO_REFRESH_TOKEN", None)
+        refreshed, message = refresh_after_auth_error(tmp_path)
+        assert refreshed is False
+        assert "disabled" in message
+    finally:
+        if old is None:
+            os.environ.pop("PLAUD_AUTO_REFRESH_TOKEN", None)
+        else:
+            os.environ["PLAUD_AUTO_REFRESH_TOKEN"] = old
 
 
 def test_result_counts_and_format():

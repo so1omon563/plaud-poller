@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -686,6 +687,20 @@ def process_recording(
     return SyncResult("unchanged", f"unchanged Plaud note: {rid[:8]}")
 
 
+def refresh_after_auth_error(repo_root: Path) -> tuple[bool, str]:
+    """Force a browser-session refresh after PLAUD rejects a still-unexpired token."""
+    from .auth import refresh_env_token
+    from .config import load_dotenv, truthy
+
+    if not truthy(os.environ.get("PLAUD_AUTO_REFRESH_TOKEN")):
+        return False, "PLAUD_AUTO_REFRESH_TOKEN is disabled"
+    env_path = repo_root / ".env"
+    changed, message = refresh_env_token(env_path, force=True)
+    if changed:
+        load_dotenv(env_path, override=True)
+    return changed, message
+
+
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Poll PLAUD and sync local artifacts/Obsidian notes")
     parser.add_argument("--dry-run", action="store_true", help="List recordings/status without writing artifacts")
@@ -701,8 +716,17 @@ def run(argv: list[str] | None = None) -> int:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         settings.recordings_dir.mkdir(parents=True, exist_ok=True)
         settings.obsidian_dir.mkdir(parents=True, exist_ok=True)
-        rows = client.list_all(page_size=settings.page_size, include_trash=settings.include_trash)
-        filetags = client.list_filetags()
+        try:
+            rows = client.list_all(page_size=settings.page_size, include_trash=settings.include_trash)
+            filetags = client.list_filetags()
+        except PlaudAuthError as exc:
+            refreshed, refresh_message = refresh_after_auth_error(repo_root)
+            if not refreshed:
+                raise PlaudAuthError(f"{exc}; auto-refresh failed: {refresh_message}") from exc
+            settings = load_settings(repo_root)
+            client = PlaudClient(settings)
+            rows = client.list_all(page_size=settings.page_size, include_trash=settings.include_trash)
+            filetags = client.list_filetags()
         if args.limit:
             rows = rows[: args.limit]
         report_mode = args.report or settings.report_mode
