@@ -60,6 +60,7 @@ def write_bytes_if_missing(path: Path, content: bytes) -> bool:
 
 
 MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+OBSIDIAN_WIKI_IMAGE_RE = re.compile(r"!\[\[([^\]|]+)(?:\|([^\]]*))?\]\]")
 TASK_LINE_RE = re.compile(r"^(?P<prefix>\s*[-*+]\s+\[)(?P<status>[^\]])(?P<suffix>\]\s+)(?P<body>.*)$")
 TASK_METADATA_RE = re.compile(r"\s+(?:✅|📅|➕|⏳|🛫|🔁|⏫|🔼|🔽|⏬|🔺).*?$")
 
@@ -104,6 +105,38 @@ def localize_markdown_images(
         return f"![{alt}]({rel_path.as_posix()})"
 
     return MARKDOWN_IMAGE_RE.sub(replacement, markdown), downloaded
+
+
+def preserve_existing_image_link_styles(generated_markdown: str, existing_markdown: str | None) -> str:
+    """Preserve Obsidian's rewritten wiki-image syntax for equivalent local images.
+
+    Obsidian may rewrite `![alt](_attachments/.../image.png)` to
+    `![[image.png|alt]]`. Both render the same file, so the poller should not
+    flip the syntax back on every run and create noisy visible updates.
+    """
+    if not generated_markdown or not existing_markdown:
+        return generated_markdown
+
+    existing_by_key: dict[tuple[str, str], str] = {}
+    existing_by_filename: dict[str, str] = {}
+    for match in OBSIDIAN_WIKI_IMAGE_RE.finditer(existing_markdown):
+        target = match.group(1).strip()
+        alt = (match.group(2) or "").strip()
+        filename = Path(unquote(target)).name
+        if not filename:
+            continue
+        existing_by_key.setdefault((filename, alt), match.group(0))
+        existing_by_filename.setdefault(filename, match.group(0))
+
+    def replacement(match: re.Match[str]) -> str:
+        alt = match.group(1).strip()
+        raw_path = match.group(2).strip("<>")
+        filename = Path(unquote(raw_path)).name
+        if not filename:
+            return match.group(0)
+        return existing_by_key.get((filename, alt)) or existing_by_filename.get(filename) or match.group(0)
+
+    return MARKDOWN_IMAGE_RE.sub(replacement, generated_markdown)
 
 
 def split_task_body_metadata(body: str) -> tuple[str, str]:
@@ -577,6 +610,7 @@ def process_recording(
         include_transcript=include_transcript,
         include_outline=include_outline,
     )
+    note = preserve_existing_image_link_styles(note, existing_note_text)
     note_hash = sha256_text(note)
     old = state.get(rid)
     changed = old is None or any(

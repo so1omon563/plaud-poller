@@ -11,6 +11,7 @@ from plaud_poller.poll import (
     format_counts,
     localize_markdown_images,
     move_note,
+    preserve_existing_image_link_styles,
     preserve_existing_task_states,
     resolve_note_path,
     result_counts,
@@ -176,6 +177,20 @@ def test_localize_markdown_images_downloads_and_rewrites_to_obsidian_relative_pa
     assert rewritten == f"Before\n\n![PLAUD NOTE]({expected_rel})\n\nAfter"
     assert assets == [tmp_path / "vault" / "Plaud" / expected_rel]
     assert assets[0].read_bytes() == b"\x89PNG\r\n\x1a\nimage-bytes"
+
+
+def test_preserve_existing_image_link_styles_keeps_obsidian_wiki_embeds():
+    generated = "Before\n![PLAUD NOTE](_attachments/plaud/rec/20260708_153956_5004367b.png)\nAfter"
+    existing = "Before\n![[20260708_153956_5004367b.png|PLAUD NOTE]]\nAfter"
+
+    assert preserve_existing_image_link_styles(generated, existing) == existing
+
+
+def test_preserve_existing_image_link_styles_leaves_new_images_alone():
+    generated = "![PLAUD NOTE](_attachments/plaud/rec/new.png)\n"
+    existing = "![[old.png|PLAUD NOTE]]\n"
+
+    assert preserve_existing_image_link_styles(generated, existing) == generated
 
 
 def test_preserve_existing_task_states_keeps_checked_tasks_and_completion_dates():
