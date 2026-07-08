@@ -596,15 +596,18 @@ def process_recording(
             return SyncResult("updated", f"would update Plaud note: {rid[:8]}")
         return SyncResult("unchanged", f"unchanged Plaud note: {rid[:8]}")
 
+    # Full metadata includes volatile presigned PLAUD URLs, so do not treat that
+    # artifact as user-visible work for notification purposes.
     write_text_if_changed(rec_dir / "metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    artifact_written = False
     if transcript_segments is not None:
-        write_text_if_changed(rec_dir / "transcript.json", json.dumps(transcript_segments, ensure_ascii=False, indent=2) + "\n")
-        write_text_if_changed(rec_dir / "transcript.md", transcript_md + ("\n" if transcript_md else ""))
+        artifact_written = write_text_if_changed(rec_dir / "transcript.json", json.dumps(transcript_segments, ensure_ascii=False, indent=2) + "\n") or artifact_written
+        artifact_written = write_text_if_changed(rec_dir / "transcript.md", transcript_md + ("\n" if transcript_md else "")) or artifact_written
     if summary_md:
-        write_text_if_changed(rec_dir / "summary.md", summary_md.strip() + "\n")
+        artifact_written = write_text_if_changed(rec_dir / "summary.md", summary_md.strip() + "\n") or artifact_written
     if outline_items is not None:
-        write_text_if_changed(rec_dir / "outline.json", json.dumps(outline_items, ensure_ascii=False, indent=2) + "\n")
-        write_text_if_changed(rec_dir / "outline.md", outline_md + ("\n" if outline_md else ""))
+        artifact_written = write_text_if_changed(rec_dir / "outline.json", json.dumps(outline_items, ensure_ascii=False, indent=2) + "\n") or artifact_written
+        artifact_written = write_text_if_changed(rec_dir / "outline.md", outline_md + ("\n" if outline_md else "")) or artifact_written
 
     if download_audio and not audio_downloaded:
         try:
@@ -612,6 +615,7 @@ def process_recording(
             payload = client.fetch_presigned_bytes(url)
             if write_bytes_if_missing(rec_dir / "audio", payload):
                 audio_downloaded = True
+                artifact_written = True
         except PlaudApiError as exc:
             print(f"WARN {rid}: audio fetch failed: {exc}", file=sys.stderr)
 
@@ -636,13 +640,13 @@ def process_recording(
         summary_hash=summary_hash,
         note_hash=note_hash,
         audio_downloaded=audio_downloaded,
-        changed=changed or note_written or renamed_note,
+        changed=changed or note_written or renamed_note or artifact_written,
     )
     if old is None:
         return SyncResult("new", f"new Plaud note: {rid[:8]}")
     if renamed_note:
         return SyncResult("renamed", f"renamed Plaud note: {rid[:8]}")
-    if changed or note_written:
+    if note_written or artifact_written:
         return SyncResult("updated", f"updated Plaud note: {rid[:8]}")
     return SyncResult("unchanged", f"unchanged Plaud note: {rid[:8]}")
 
