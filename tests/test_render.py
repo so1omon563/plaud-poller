@@ -1,5 +1,7 @@
 import os
+from types import MethodType
 
+from plaud_poller.api import PlaudAuthError, PlaudClient
 from plaud_poller.config import load_settings
 from plaud_poller.poll import (
     backup_note_before_overwrite,
@@ -246,6 +248,21 @@ def test_preserve_task_state_config_defaults_true_and_can_be_disabled(tmp_path):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def test_plaud_status_token_expired_raises_auth_error():
+    client = PlaudClient.__new__(PlaudClient)
+
+    def fake_request_text(self, path_or_url, *, method="GET", body=None, headers=None):
+        return '{"status": -419, "msg": "workspace token expired"}'
+
+    client._request_text = MethodType(fake_request_text, client)
+    try:
+        client.request_json("/file/simple/web")
+    except PlaudAuthError as exc:
+        assert "token expired" in str(exc)
+    else:
+        raise AssertionError("expired PLAUD status should raise PlaudAuthError")
 
 
 def test_result_counts_and_format():

@@ -65,6 +65,13 @@ class PlaudClient:
                     f"Plaud {path} returned non-JSON after region correction: {exc}",
                     body=text[:500],
                 ) from exc
+        if isinstance(parsed, dict):
+            status = parsed.get("status")
+            if isinstance(status, int) and status != 0:
+                msg = str(parsed.get("msg") or parsed)[:500]
+                if status in {-401, -419} or "token" in msg.lower() or "expired" in msg.lower():
+                    raise PlaudAuthError(msg)
+                raise PlaudApiError(f"Plaud {path} returned status {status}: {msg}", body=text[:500])
         return parsed
 
     def _request_text(
