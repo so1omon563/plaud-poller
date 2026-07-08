@@ -265,6 +265,14 @@ Force replacement even if the current `.env` token still has time left:
 python3 -m plaud_poller.auth refresh --env .env --force
 ```
 
+If the browser session has been server-invalidated and PLAUD requires a full login re-exchange, open the login page and poll browser storage for the fresh PLAUD token:
+
+```bash
+python3 -m plaud_poller.auth browser-login --env .env --method google
+```
+
+`--method` is a status/output hint and accepts `google`, `apple`, `email`, or `generic`; the actual login still happens in the browser UI. This makes the recovery path work for Google, Apple, and regular email accounts without scraping provider credentials. For Google and Apple, the helper relies on the browser's normal identity-provider session to complete the re-exchange. For email accounts, complete the PLAUD email/password or magic-link flow in the browser, then the helper captures only the resulting PLAUD token metadata.
+
 The helper prints token metadata only, such as browser/profile, region, and expiry. It never prints the token value.
 
 Optional auto-refresh before every poll:

@@ -9,12 +9,13 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 from .config import REGION_API_BASES
@@ -476,11 +477,67 @@ def refresh_env_token(env_path: Path, *, min_ttl_seconds: int = 3600, force: boo
     return False, f"no valid browser token found{detail}"
 
 
+def build_login_url(from_url: str = "https://web.plaud.ai/") -> str:
+    return f"https://web.plaud.ai/login?from_url={quote(from_url, safe='')}"
+
+
+def open_browser_url(url: str) -> None:
+    if sys.platform == "darwin":
+        subprocess.run(["open", "-a", "Google Chrome", url], check=False)  # noqa: S603,S607
+        return
+    if os.name == "nt":
+        os.startfile(url)  # type: ignore[attr-defined]  # noqa: S606
+        return
+    subprocess.run(["xdg-open", url], check=False)  # noqa: S603,S607
+
+
+def browser_login_refresh(
+    env_path: Path,
+    *,
+    timeout_seconds: int = 180,
+    interval_seconds: int = 5,
+    open_browser: bool = True,
+    login_method: str = "generic",
+) -> tuple[bool, str]:
+    """Open PLAUD login and poll browser storage for a fresh PLAUD token.
+
+    This does not scrape Google/Apple credentials. It relies on the real browser
+    login flow to mint fresh PLAUD workspace session data, then reuses the normal
+    redacted browser-token refresh path.
+    """
+    if open_browser:
+        open_browser_url(build_login_url())
+    deadline = time.time() + timeout_seconds
+    attempts = 0
+    last_message = "not attempted"
+    while time.time() <= deadline:
+        attempts += 1
+        changed, message = refresh_env_token(env_path, force=True)
+        last_message = message
+        if changed:
+            return True, f"browser login refreshed token after {attempts} attempt(s) via {login_method}: {message}"
+        time.sleep(max(1, interval_seconds))
+    return False, f"browser login timed out after {attempts} attempt(s); last status: {last_message}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="PLAUD auth helper")
-    parser.add_argument("command", choices=["detect", "refresh"], help="Detect browser tokens or refresh .env")
+    parser.add_argument(
+        "command",
+        choices=["detect", "refresh", "browser-login"],
+        help="Detect browser tokens, refresh .env, or open PLAUD login and wait for browser re-exchange",
+    )
     parser.add_argument("--env", default=".env", help="Path to .env file to update")
     parser.add_argument("--force", action="store_true", help="Refresh even when current token appears usable")
+    parser.add_argument("--timeout", type=int, default=180, help="browser-login timeout in seconds")
+    parser.add_argument("--interval", type=int, default=5, help="browser-login polling interval in seconds")
+    parser.add_argument("--no-open", action="store_true", help="browser-login: do not open the browser, only poll storage")
+    parser.add_argument(
+        "--method",
+        choices=["google", "apple", "email", "generic"],
+        default="generic",
+        help="browser-login method hint for status output; login still happens in the browser UI",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "detect":
@@ -506,6 +563,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"no valid PLAUD browser tokens found; scanned_candidates={len(found)}")
             return 1
         return 0
+
+    if args.command == "browser-login":
+        changed, message = browser_login_refresh(
+            Path(args.env),
+            timeout_seconds=max(1, args.timeout),
+            interval_seconds=max(1, args.interval),
+            open_browser=not args.no_open,
+            login_method=args.method,
+        )
+        print(message)
+        return 0 if changed else 1
 
     changed, message = refresh_env_token(Path(args.env), force=args.force)
     print(message)

@@ -2,7 +2,7 @@ import os
 from types import MethodType
 
 from plaud_poller.api import PlaudAuthError, PlaudClient
-from plaud_poller.auth import BrowserWorkspaceSession, _scan_file_for_workspace_sessions
+from plaud_poller.auth import BrowserWorkspaceSession, _scan_file_for_workspace_sessions, build_login_url
 from plaud_poller.config import load_settings
 from plaud_poller.poll import (
     backup_note_before_overwrite,
@@ -249,6 +249,13 @@ def test_preserve_task_state_config_defaults_true_and_can_be_disabled(tmp_path):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def test_build_login_url_encodes_return_url():
+    assert build_login_url() == "https://web.plaud.ai/login?from_url=https%3A%2F%2Fweb.plaud.ai%2F"
+    assert build_login_url("https://web.plaud.ai/some/path?q=1") == (
+        "https://web.plaud.ai/login?from_url=https%3A%2F%2Fweb.plaud.ai%2Fsome%2Fpath%3Fq%3D1"
+    )
 
 
 def test_browser_workspace_session_scanner_reads_refresh_token(tmp_path):
