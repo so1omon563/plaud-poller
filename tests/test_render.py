@@ -1,3 +1,6 @@
+import os
+
+from plaud_poller.config import load_settings
 from plaud_poller.poll import (
     backup_note_before_overwrite,
     find_note_by_plaud_id,
@@ -215,6 +218,34 @@ def test_preserve_existing_task_states_keeps_generated_metadata_when_existing_ha
     generated = "- [ ] Follow up with Kyle. 📅 2026-07-21\n"
 
     assert preserve_existing_task_states(generated, existing) == generated
+
+
+def test_preserve_task_state_config_defaults_true_and_can_be_disabled(tmp_path):
+    env_keys = [
+        "PLAUD_AUTHORIZATION",
+        "PLAUD_TOKEN",
+        "PLAUD_DATA_DIR",
+        "PLAUD_RECORDINGS_DIR",
+        "PLAUD_STATE_DB",
+        "PLAUD_OBSIDIAN_DIR",
+        "PLAUD_PRESERVE_TASK_STATE",
+    ]
+    old_env = {key: os.environ.get(key) for key in env_keys}
+    try:
+        for key in env_keys:
+            os.environ.pop(key, None)
+        (tmp_path / ".env").write_text("PLAUD_TOKEN=test-token\n", encoding="utf-8")
+        assert load_settings(tmp_path).preserve_task_state is True
+
+        os.environ.pop("PLAUD_TOKEN", None)
+        (tmp_path / ".env").write_text("PLAUD_TOKEN=test-token\nPLAUD_PRESERVE_TASK_STATE=false\n", encoding="utf-8")
+        assert load_settings(tmp_path).preserve_task_state is False
+    finally:
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def test_result_counts_and_format():

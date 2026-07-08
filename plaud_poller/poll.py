@@ -475,6 +475,7 @@ def process_recording(
     filetags: dict[str, dict[str, Any]],
     backup_on_change: bool,
     backup_dir: Path,
+    preserve_task_state: bool,
     dry_run: bool,
 ) -> SyncResult:
     rid = recording_id(row)
@@ -558,7 +559,7 @@ def process_recording(
             existing_note_text = note_path.read_text(encoding="utf-8")
         except OSError:
             existing_note_text = None
-    if summary_md:
+    if summary_md and preserve_task_state:
         summary_md = preserve_existing_task_states(summary_md, existing_note_text)
         summary_hash = sha256_text(summary_md)
 
@@ -686,23 +687,32 @@ def run(argv: list[str] | None = None) -> int:
                 filetags=filetags,
                 backup_on_change=settings.note_backup_on_change,
                 backup_dir=settings.note_backup_dir,
+                preserve_task_state=settings.preserve_task_state,
                 dry_run=args.dry_run,
             )
             results.append(result)
         if not args.limit and not settings.include_trash:
-            trash_rows = client.list_all(page_size=settings.page_size, trash_mode=1)
-            trashed_ids = {rid for row in trash_rows if (rid := recording_id(row))}
-            results.extend(
-                reconcile_removed_recordings(
-                    state=state,
-                    obsidian_dir=settings.obsidian_dir,
-                    archive_dir=settings.trash_archive_dir,
-                    visible_ids=visible_ids,
-                    trashed_ids=trashed_ids,
-                    policy=settings.trash_policy,
-                    dry_run=args.dry_run,
+            if not visible_ids and state.all_recordings():
+                results.append(
+                    SyncResult(
+                        "warn",
+                        "WARN: active PLAUD list is empty; skipping removed-recording reconciliation to avoid archiving all notes",
+                    )
                 )
-            )
+            else:
+                trash_rows = client.list_all(page_size=settings.page_size, trash_mode=1)
+                trashed_ids = {rid for row in trash_rows if (rid := recording_id(row))}
+                results.extend(
+                    reconcile_removed_recordings(
+                        state=state,
+                        obsidian_dir=settings.obsidian_dir,
+                        archive_dir=settings.trash_archive_dir,
+                        visible_ids=visible_ids,
+                        trashed_ids=trashed_ids,
+                        policy=settings.trash_policy,
+                        dry_run=args.dry_run,
+                    )
+                )
         counts = result_counts(results)
         if args.dry_run and report_mode != "quiet":
             print(f"Plaud recordings visible: {len(rows)}")

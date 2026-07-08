@@ -48,6 +48,7 @@ class Settings:
     note_backup_dir: Path
     note_include_transcript: bool
     note_include_outline: bool
+    preserve_task_state: bool
 
     @property
     def api_base(self) -> str:
@@ -152,4 +153,5 @@ def load_settings(repo_root: Path | None = None) -> Settings:
         note_backup_dir=note_backup_dir,
         note_include_transcript=truthy(os.environ.get("PLAUD_NOTE_INCLUDE_TRANSCRIPT", "true")),
         note_include_outline=truthy(os.environ.get("PLAUD_NOTE_INCLUDE_OUTLINE")),
+        preserve_task_state=truthy(os.environ.get("PLAUD_PRESERVE_TASK_STATE", "true")),
     )

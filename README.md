@@ -43,6 +43,7 @@ The project favors plain files, local state, and scheduled runs over hosted work
 - Reconcile renamed notes by PLAUD ID instead of leaving duplicates.
 - Archive, keep, or delete local notes whose PLAUD recordings are no longer active.
 - Optionally back up existing Obsidian notes before overwriting or renaming them.
+- Optionally preserve local Markdown task checkbox state for Obsidian Tasks dashboards.
 - Provide quiet, change-only, summary, and verbose reporting modes.
 - Provide diagnostics, canonical summary verification, and repository privacy checks.
 - Keep credentials and synced PLAUD content out of git.
@@ -115,6 +116,7 @@ All paths are configurable with environment variables. Leave path variables blan
 | `PLAUD_NOTE_BACKUP_DIR` | Destination for note version backups | `$PLAUD_OBSIDIAN_DIR/_Archive/plaud-note-versions` |
 | `PLAUD_NOTE_INCLUDE_TRANSCRIPT` | Include full transcript text in generated Markdown notes | `true` |
 | `PLAUD_NOTE_INCLUDE_OUTLINE` | Include PLAUD outline as an extra Markdown section in generated notes | `false` |
+| `PLAUD_PRESERVE_TASK_STATE` | Preserve local Markdown task checkbox state across regenerated PLAUD summaries | `true` |
 
 Example for Obsidian:
 
@@ -146,6 +148,8 @@ Other policies are available:
 
 Set `PLAUD_INCLUDE_TRASH=true` only if you intentionally want local copies of deleted or trashed PLAUD recordings.
 
+As a safety guard, if PLAUD unexpectedly returns an empty active-recording list while the local state database already knows about recordings, the poller skips removed-recording reconciliation for that run. This avoids archiving or deleting every local note during a transient API/session issue.
+
 ### Note content
 
 Transcript and outline artifacts are always saved under `PLAUD_RECORDINGS_DIR` when available. Generated notes can include or omit those sections:
@@ -156,6 +160,20 @@ PLAUD_NOTE_INCLUDE_OUTLINE=false
 ```
 
 Set `PLAUD_NOTE_INCLUDE_TRANSCRIPT=false` if you want generated notes to focus on PLAUD summaries while keeping transcripts available as local artifacts. Set `PLAUD_NOTE_INCLUDE_OUTLINE=true` if you want the PLAUD outline appended as a separate note section.
+
+PLAUD summaries may contain Markdown task checkboxes, which work well with Obsidian Tasks and Dataview dashboards. By default, the poller preserves local checkbox state for matching task text when a PLAUD summary is regenerated:
+
+```bash
+PLAUD_PRESERVE_TASK_STATE=true
+```
+
+This means a task completed in Obsidian stays completed even if PLAUD still returns it as unchecked. The matcher is conservative: it compares normalized task text, preserves duplicate tasks by occurrence order, and keeps Obsidian Tasks completion metadata such as `✅ 2026-07-08`.
+
+Set this to `false` if you want PLAUD to remain fully canonical and overwrite local task completion state on every regenerated note:
+
+```bash
+PLAUD_PRESERVE_TASK_STATE=false
+```
 
 Generated Markdown filenames use the PLAUD title only, for example:
 
@@ -297,7 +315,8 @@ It checks:
 - active and trashed PLAUD recording counts,
 - whether trash sync is enabled and which trash policy is active,
 - report mode and note backup settings,
-- whether transcript and outline sections are included in notes.
+- whether transcript and outline sections are included in notes,
+- whether local Markdown task checkbox state is preserved across regenerated summaries.
 
 Installed CLI entrypoint:
 

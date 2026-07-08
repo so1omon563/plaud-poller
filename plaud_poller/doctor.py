@@ -163,6 +163,7 @@ def run(argv: list[str] | None = None) -> int:
         checks.append(Check("note_backup_dir", True, str(settings.note_backup_dir)))
         checks.append(Check("note_include_transcript", True, str(settings.note_include_transcript).lower()))
         checks.append(Check("note_include_outline", True, str(settings.note_include_outline).lower()))
+        checks.append(Check("preserve_task_state", True, str(settings.preserve_task_state).lower()))
     except Exception as exc:
         checks.append(Check("plaud_api", False, str(exc)))
 
