@@ -646,7 +646,7 @@ def process_recording(
         return SyncResult("new", f"new Plaud note: {rid[:8]}")
     if renamed_note:
         return SyncResult("renamed", f"renamed Plaud note: {rid[:8]}")
-    if note_written or artifact_written:
+    if note_written:
         return SyncResult("updated", f"updated Plaud note: {rid[:8]}")
     return SyncResult("unchanged", f"unchanged Plaud note: {rid[:8]}")
 
