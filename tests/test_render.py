@@ -2,6 +2,7 @@ import os
 from types import MethodType
 
 from plaud_poller.api import PlaudAuthError, PlaudClient
+from plaud_poller.auth import BrowserWorkspaceSession, _scan_file_for_workspace_sessions
 from plaud_poller.config import load_settings
 from plaud_poller.poll import (
     backup_note_before_overwrite,
@@ -248,6 +249,33 @@ def test_preserve_task_state_config_defaults_true_and_can_be_disabled(tmp_path):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def test_browser_workspace_session_scanner_reads_refresh_token(tmp_path):
+    text = (
+        'x pld_user:workspaceList\\v\\x01'
+        '[{"workspaceId":"ws_123","domain":"https://api.plaud.ai","region":"aws:us-west-2",'
+        '"workspaceToken":"old-token","expiresAt":1783533595505,'
+        '"refreshToken":"refresh-token","refreshExpiresAt":1786039195505}]'
+    )
+    path = tmp_path / "000001.log"
+    path.write_text(text, encoding="utf-8")
+
+    sessions = _scan_file_for_workspace_sessions(path, "Chrome", "Default")
+
+    assert sessions == [
+        BrowserWorkspaceSession(
+            browser="Chrome",
+            profile="Default",
+            workspace_id="ws_123",
+            domain="https://api.plaud.ai",
+            region="aws:us-west-2",
+            workspace_token="old-token",
+            expires_at_ms=1783533595505,
+            refresh_token="refresh-token",
+            refresh_expires_at_ms=1786039195505,
+        )
+    ]
 
 
 def test_plaud_status_token_expired_raises_auth_error():
