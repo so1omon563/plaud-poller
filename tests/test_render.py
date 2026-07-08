@@ -3,6 +3,7 @@ from plaud_poller.poll import (
     find_note_by_plaud_id,
     folder_names_from_filetags,
     format_counts,
+    localize_markdown_images,
     move_note,
     resolve_note_path,
     result_counts,
@@ -145,6 +146,29 @@ def test_unique_destination_adds_suffix(tmp_path):
     first = tmp_path / "Note.md"
     first.write_text("x", encoding="utf-8")
     assert unique_destination(first) == tmp_path / "Note (2).md"
+
+
+def test_localize_markdown_images_downloads_and_rewrites_to_obsidian_relative_path(tmp_path):
+    class FakeClient:
+        def fetch_presigned_bytes(self, url):
+            assert url == "https://plaud.example/presigned-image"
+            return b"\x89PNG\r\n\x1a\nimage-bytes"
+
+    summary = "Before\n\n![PLAUD NOTE](permanent/account/mark/20260708_153956_5004367b.png)\n\nAfter"
+    rewritten, assets = localize_markdown_images(
+        summary,
+        client=FakeClient(),
+        download_path_mapping={
+            "permanent/account/mark/20260708_153956_5004367b.png": "https://plaud.example/presigned-image"
+        },
+        obsidian_dir=tmp_path / "vault" / "Plaud",
+        recording_id="74219dade0f05fbcd5fdd20426e7ca74",
+    )
+
+    expected_rel = "_attachments/plaud/74219dade0f05fbcd5fdd20426e7ca74/20260708_153956_5004367b.png"
+    assert rewritten == f"Before\n\n![PLAUD NOTE]({expected_rel})\n\nAfter"
+    assert assets == [tmp_path / "vault" / "Plaud" / expected_rel]
+    assert assets[0].read_bytes() == b"\x89PNG\r\n\x1a\nimage-bytes"
 
 
 def test_result_counts_and_format():

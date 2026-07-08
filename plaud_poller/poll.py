@@ -6,9 +6,11 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import sys
 from typing import Any
+from urllib.parse import unquote
 
 from .api import PlaudApiError, PlaudAuthError, PlaudClient, maybe_gunzip
 from .config import load_settings
@@ -55,6 +57,51 @@ def write_bytes_if_missing(path: Path, content: bytes) -> bool:
         return False
     path.write_bytes(content)
     return True
+
+
+MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+
+
+def localize_markdown_images(
+    markdown: str | None,
+    *,
+    client: PlaudClient,
+    download_path_mapping: Any,
+    obsidian_dir: Path,
+    recording_id: str,
+) -> tuple[str | None, list[Path]]:
+    """Download PLAUD markdown images and rewrite them to vault-local paths.
+
+    PLAUD summary markdown can reference internal storage paths such as
+    `permanent/.../mark/example.png`. Obsidian treats those as vault-relative
+    paths and cannot render them unless the poller downloads the mapped asset.
+    """
+    if not markdown or not isinstance(download_path_mapping, dict):
+        return markdown, []
+
+    downloaded: list[Path] = []
+
+    def replacement(match: re.Match[str]) -> str:
+        alt = match.group(1)
+        raw_path = match.group(2).strip("<>")
+        if raw_path.startswith(("http://", "https://", "data:")):
+            return match.group(0)
+        url = download_path_mapping.get(raw_path) or download_path_mapping.get(unquote(raw_path))
+        if not isinstance(url, str) or not url:
+            return match.group(0)
+        filename = Path(unquote(raw_path)).name or "plaud-image"
+        rel_path = Path("_attachments") / "plaud" / recording_id / filename
+        dest = obsidian_dir / rel_path
+        try:
+            payload = client.fetch_presigned_bytes(url)
+            write_bytes_if_missing(dest, payload)
+            downloaded.append(dest)
+        except Exception as exc:
+            print(f"WARN {recording_id}: image fetch failed for {raw_path}: {exc}", file=sys.stderr)
+            return match.group(0)
+        return f"![{alt}]({rel_path.as_posix()})"
+
+    return MARKDOWN_IMAGE_RE.sub(replacement, markdown), downloaded
 
 
 def backup_note_before_overwrite(path: Path, backup_dir: Path) -> Path | None:
@@ -415,6 +462,15 @@ def process_recording(
             except PlaudApiError as exc:
                 # Keep metadata sync alive even if transcript endpoint is temporarily unavailable.
                 print(f"WARN {rid}: transcript/summary fetch failed: {exc}", file=sys.stderr)
+
+    if summary_md and not dry_run:
+        summary_md, _image_paths = localize_markdown_images(
+            summary_md,
+            client=client,
+            download_path_mapping=detail.get("download_path_mapping"),
+            obsidian_dir=obsidian_dir,
+            recording_id=rid,
+        )
 
     metadata = {
         "list_row": row,
