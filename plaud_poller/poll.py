@@ -60,6 +60,8 @@ def write_bytes_if_missing(path: Path, content: bytes) -> bool:
 
 
 MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+TASK_LINE_RE = re.compile(r"^(?P<prefix>\s*[-*+]\s+\[)(?P<status>[^\]])(?P<suffix>\]\s+)(?P<body>.*)$")
+TASK_METADATA_RE = re.compile(r"\s+(?:✅|📅|➕|⏳|🛫|🔁|⏫|🔼|🔽|⏬|🔺).*?$")
 
 
 def localize_markdown_images(
@@ -102,6 +104,61 @@ def localize_markdown_images(
         return f"![{alt}]({rel_path.as_posix()})"
 
     return MARKDOWN_IMAGE_RE.sub(replacement, markdown), downloaded
+
+
+def split_task_body_metadata(body: str) -> tuple[str, str]:
+    match = TASK_METADATA_RE.search(body)
+    if not match:
+        return body.rstrip(), ""
+    return body[: match.start()].rstrip(), body[match.start() :].rstrip()
+
+
+def normalize_task_body(body: str) -> str:
+    text, _metadata = split_task_body_metadata(body)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.casefold()
+
+
+def preserve_existing_task_states(generated_markdown: str | None, existing_markdown: str | None) -> str | None:
+    """Preserve local Obsidian task completion state across PLAUD summary rewrites.
+
+    Matches conservatively by normalized task text and occurrence order. This
+    keeps Tasks-plugin checkbox changes made in dashboards from being reset when
+    the poller re-renders a note from PLAUD's canonical summary.
+    """
+    if not generated_markdown or not existing_markdown:
+        return generated_markdown
+
+    existing_by_text: dict[str, list[tuple[str, str]]] = {}
+    for line in existing_markdown.splitlines():
+        match = TASK_LINE_RE.match(line)
+        if not match:
+            continue
+        body = match.group("body")
+        key = normalize_task_body(body)
+        if not key:
+            continue
+        _base, metadata = split_task_body_metadata(body)
+        existing_by_text.setdefault(key, []).append((match.group("status"), metadata))
+
+    out: list[str] = []
+    for line in generated_markdown.splitlines(keepends=True):
+        newline = "\n" if line.endswith("\n") else ""
+        bare = line[:-1] if newline else line
+        match = TASK_LINE_RE.match(bare)
+        if not match:
+            out.append(line)
+            continue
+        key = normalize_task_body(match.group("body"))
+        preserved = existing_by_text.get(key, [])
+        if not preserved:
+            out.append(line)
+            continue
+        status, metadata = preserved.pop(0)
+        generated_body, generated_metadata = split_task_body_metadata(match.group("body"))
+        body = generated_body + (metadata or generated_metadata)
+        out.append(f"{match.group('prefix')}{status}{match.group('suffix')}{body}{newline}")
+    return "".join(out)
 
 
 def backup_note_before_overwrite(path: Path, backup_dir: Path) -> Path | None:
@@ -488,6 +545,23 @@ def process_recording(
     folder_tags = tags_from_folders(folder_names)
     speakers = speaker_names_from_segments(transcript_segments)
 
+    note_path = resolve_note_path(obsidian_dir, title, rid)
+    existing_note_path = find_note_by_plaud_id(obsidian_dir, rid)
+    existing_note_text: str | None = None
+    if existing_note_path and existing_note_path.exists():
+        try:
+            existing_note_text = existing_note_path.read_text(encoding="utf-8")
+        except OSError:
+            existing_note_text = None
+    elif note_path.exists():
+        try:
+            existing_note_text = note_path.read_text(encoding="utf-8")
+        except OSError:
+            existing_note_text = None
+    if summary_md:
+        summary_md = preserve_existing_task_states(summary_md, existing_note_text)
+        summary_hash = sha256_text(summary_md)
+
     rec_dir = data_dir / "recordings" / rid
     note = render_obsidian_note(
         plaud_id=rid,
@@ -541,8 +615,6 @@ def process_recording(
         except PlaudApiError as exc:
             print(f"WARN {rid}: audio fetch failed: {exc}", file=sys.stderr)
 
-    note_path = resolve_note_path(obsidian_dir, title, rid)
-    existing_note_path = find_note_by_plaud_id(obsidian_dir, rid)
     renamed_note = False
     if not dry_run and existing_note_path and existing_note_path != note_path:
         if backup_on_change:

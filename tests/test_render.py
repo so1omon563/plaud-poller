@@ -5,6 +5,7 @@ from plaud_poller.poll import (
     format_counts,
     localize_markdown_images,
     move_note,
+    preserve_existing_task_states,
     resolve_note_path,
     result_counts,
     speaker_names_from_segments,
@@ -169,6 +170,51 @@ def test_localize_markdown_images_downloads_and_rewrites_to_obsidian_relative_pa
     assert rewritten == f"Before\n\n![PLAUD NOTE]({expected_rel})\n\nAfter"
     assert assets == [tmp_path / "vault" / "Plaud" / expected_rel]
     assert assets[0].read_bytes() == b"\x89PNG\r\n\x1a\nimage-bytes"
+
+
+def test_preserve_existing_task_states_keeps_checked_tasks_and_completion_dates():
+    existing = """## Next Arrangements
+- [x] Jed to start IESDO-2244 and coordinate with Kevin. ✅ 2026-07-08
+- [ ] Confirm the release date.
+"""
+    generated = """## Next Arrangements
+- [ ] Jed to start IESDO-2244 and coordinate with Kevin.
+- [ ] Confirm the release date.
+- [ ] New Plaud task.
+"""
+
+    assert preserve_existing_task_states(generated, existing) == """## Next Arrangements
+- [x] Jed to start IESDO-2244 and coordinate with Kevin. ✅ 2026-07-08
+- [ ] Confirm the release date.
+- [ ] New Plaud task.
+"""
+
+
+def test_preserve_existing_task_states_preserves_duplicate_tasks_by_occurrence_order():
+    existing = """- [x] Follow up with Kyle. ✅ 2026-07-08
+- [ ] Follow up with Kyle.
+"""
+    generated = """- [ ] Follow up with Kyle.
+- [ ] Follow up with Kyle.
+"""
+
+    assert preserve_existing_task_states(generated, existing) == """- [x] Follow up with Kyle. ✅ 2026-07-08
+- [ ] Follow up with Kyle.
+"""
+
+
+def test_preserve_existing_task_states_ignores_materially_rewritten_tasks():
+    existing = "- [x] Follow up with Kyle about DS refresh. ✅ 2026-07-08\n"
+    generated = "- [ ] Follow up with Kyle about the release plan.\n"
+
+    assert preserve_existing_task_states(generated, existing) == generated
+
+
+def test_preserve_existing_task_states_keeps_generated_metadata_when_existing_has_no_metadata():
+    existing = "- [ ] Follow up with Kyle.\n"
+    generated = "- [ ] Follow up with Kyle. 📅 2026-07-21\n"
+
+    assert preserve_existing_task_states(generated, existing) == generated
 
 
 def test_result_counts_and_format():
