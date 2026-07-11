@@ -1,6 +1,8 @@
 import os
 from types import MethodType
+from urllib.parse import urlparse
 
+from plaud_poller import auth
 from plaud_poller.api import PlaudAuthError, PlaudClient
 from plaud_poller.auth import BrowserWorkspaceSession, _scan_file_for_workspace_sessions, build_login_url
 from plaud_poller.config import load_settings
@@ -328,6 +330,78 @@ def test_refresh_after_auth_error_respects_auto_refresh_flag(tmp_path):
             os.environ.pop("PLAUD_AUTO_REFRESH_TOKEN", None)
         else:
             os.environ["PLAUD_AUTO_REFRESH_TOKEN"] = old
+
+
+def test_validate_token_does_not_recurse_on_region_redirect_cycle():
+    calls: list[str] = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"status": -302, "data": {"domains": {"api": "https://api.plaud.ai"}}}'
+
+    original = auth.urlopen
+    try:
+        def fake_urlopen(request, **_kwargs):
+            calls.append(urlparse(request.full_url).hostname or "")
+            return FakeResponse()
+
+        auth.urlopen = fake_urlopen
+        ok, region, error = auth.validate_token("synthetic-token", "aws:eu-central-1")
+    finally:
+        auth.urlopen = original
+
+    assert ok is False
+    assert region is None
+    assert "redirected" in (error or "")
+    assert calls == ["api-euc1.plaud.ai", "api.plaud.ai", "api-apse1.plaud.ai"]
+
+
+def test_workspace_refresh_stops_redirect_cycle():
+    calls: list[str] = []
+    session = BrowserWorkspaceSession(
+        browser="test",
+        profile="Default",
+        workspace_id="workspace",
+        domain="https://api-euc1.plaud.ai",
+        region="aws:eu-central-1",
+        workspace_token=None,
+        expires_at_ms=None,
+        refresh_token="synthetic-token",
+        refresh_expires_at_ms=None,
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"status": -302, "data": {"domains": {"api": "https://api.plaud.ai"}}}'
+
+    original = auth.urlopen
+    try:
+        def fake_urlopen(request, **_kwargs):
+            calls.append(urlparse(request.full_url).hostname or "")
+            return FakeResponse()
+
+        auth.urlopen = fake_urlopen
+        ok, token, region, error = auth.refresh_workspace_session(session)
+    finally:
+        auth.urlopen = original
+
+    assert ok is False
+    assert token is None
+    assert region == "aws:us-west-2"
+    assert error == "workspace refresh redirect loop detected"
+    assert calls == ["api-euc1.plaud.ai", "api.plaud.ai"]
 
 
 def test_result_counts_and_format():

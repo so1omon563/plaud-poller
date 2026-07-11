@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
 import os
@@ -335,63 +335,65 @@ def validate_token(token: str, region: str | None = None) -> tuple[bool, str | N
             host = urlparse(api).hostname if api else None
             corrected = API_BASE_TO_REGION.get(host)
             if corrected and corrected != candidate_region:
-                return validate_token(token, corrected)
+                # `order` already includes every supported region. Restarting
+                # validation from the redirect target can loop forever when
+                # PLAUD routes two regions back to one another.
+                last_error = f"PLAUD redirected {candidate_region} to {corrected}"
+                continue
         last_error = str(body.get("msg") or body)[:200]
     return False, None, last_error
 
 
 def refresh_workspace_session(session: BrowserWorkspaceSession) -> tuple[bool, str | None, str | None, str | None]:
-    domain = session.domain or (REGION_API_BASES.get(session.region or "") or REGION_API_BASES["aws:us-west-2"])
-    url = f"{domain.rstrip('/')}/user-app/auth/workspace/refresh/{session.workspace_id}"
-    req = Request(
-        url,
-        data=b"{}",
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": USER_AGENT,
-            "Authorization": f"Bearer {session.refresh_token}",
-        },
-        method="POST",
-    )
-    try:
-        with urlopen(req, timeout=30) as resp:  # noqa: S310 - explicit Plaud API refresh
-            text = resp.read().decode("utf-8", errors="replace")
-    except HTTPError as exc:
-        return False, None, session.region, exc.read().decode("utf-8", errors="replace")[:200]
-    except URLError as exc:
-        return False, None, session.region, str(exc)[:200]
-    try:
-        body = json.loads(text)
-    except json.JSONDecodeError:
-        return False, None, session.region, text[:200]
-    if body.get("status") == -302:
-        api = (((body.get("data") or {}).get("domains") or {}).get("api"))
-        host = urlparse(api).hostname if api else None
-        corrected_region = API_BASE_TO_REGION.get(host)
-        if corrected_region and corrected_region != session.region:
-            corrected = BrowserWorkspaceSession(
-                browser=session.browser,
-                profile=session.profile,
-                workspace_id=session.workspace_id,
-                domain=api,
-                region=corrected_region,
-                workspace_token=session.workspace_token,
-                expires_at_ms=session.expires_at_ms,
-                refresh_token=session.refresh_token,
-                refresh_expires_at_ms=session.refresh_expires_at_ms,
-            )
-            return refresh_workspace_session(corrected)
-    if body.get("status") != 0:
-        return False, None, session.region, str(body.get("msg") or body)[:200]
-    data = body.get("data") or {}
-    token = data.get("workspace_token") or data.get("access_token")
-    if not isinstance(token, str) or not token:
-        return False, None, session.region, "refresh response did not include workspace token"
-    ok, region, error = validate_token(token, session.region)
-    if not ok:
-        return False, None, region or session.region, error or "refreshed workspace token did not validate"
-    return True, token, region or session.region, None
+    current = session
+    visited: set[tuple[str, str]] = set()
+    while True:
+        domain = current.domain or (REGION_API_BASES.get(current.region or "") or REGION_API_BASES["aws:us-west-2"])
+        location = (current.region or "", domain.rstrip("/"))
+        if location in visited:
+            return False, None, current.region, "workspace refresh redirect loop detected"
+        visited.add(location)
+
+        url = f"{domain.rstrip('/')}/user-app/auth/workspace/refresh/{current.workspace_id}"
+        req = Request(
+            url,
+            data=b"{}",
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": USER_AGENT,
+                "Authorization": f"Bearer {current.refresh_token}",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(req, timeout=30) as resp:  # noqa: S310 - explicit Plaud API refresh
+                text = resp.read().decode("utf-8", errors="replace")
+        except HTTPError as exc:
+            return False, None, current.region, exc.read().decode("utf-8", errors="replace")[:200]
+        except URLError as exc:
+            return False, None, current.region, str(exc)[:200]
+        try:
+            body = json.loads(text)
+        except json.JSONDecodeError:
+            return False, None, current.region, text[:200]
+        if body.get("status") == -302:
+            api = (((body.get("data") or {}).get("domains") or {}).get("api"))
+            host = urlparse(api).hostname if api else None
+            corrected_region = API_BASE_TO_REGION.get(host)
+            if api and corrected_region:
+                current = replace(current, domain=api, region=corrected_region)
+                continue
+        if body.get("status") != 0:
+            return False, None, current.region, str(body.get("msg") or body)[:200]
+        data = body.get("data") or {}
+        token = data.get("workspace_token") or data.get("access_token")
+        if not isinstance(token, str) or not token:
+            return False, None, current.region, "refresh response did not include workspace token"
+        ok, region, error = validate_token(token, current.region)
+        if not ok:
+            return False, None, region or current.region, error or "refreshed workspace token did not validate"
+        return True, token, region or current.region, None
 
 
 def read_env_token(env_path: Path) -> str | None:
