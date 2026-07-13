@@ -45,6 +45,7 @@ The project favors plain files, local state, and scheduled runs over hosted work
 - Optionally back up existing Obsidian notes before overwriting or renaming them.
 - Optionally preserve local Markdown task checkbox state for Obsidian Tasks dashboards.
 - Provide quiet, change-only, summary, and verbose reporting modes.
+- Append a compact JSONL audit event for each visible Markdown create, rename, or update, including the changed note fields.
 - Provide diagnostics, canonical summary verification, and repository privacy checks.
 - Keep credentials and synced PLAUD content out of git.
 - Avoid hardcoded machine-specific paths.
@@ -73,6 +74,10 @@ On each run, `plaud-poller`:
 9. Updates a local SQLite state database so future runs can detect real changes.
 
 The generated note body treats PLAUD's displayed summary as canonical. Sync metadata stays in YAML frontmatter. Transcript and outline data are saved as artifacts and can optionally be included in the Markdown note.
+
+### Sync audit log
+
+Every visible Markdown create, rename, or update appends one JSON object to `$PLAUD_DATA_DIR/sync-changelog.jsonl`. Each event includes the UTC timestamp, PLAUD ID, note filename, action, and a compact list of changed fields such as `title`, `duration`, `folders`, `tags`, `summary`, or `transcript`. Raw API metadata/artifact refreshes that do not change the rendered Markdown are not logged.
 
 ## Installation
 

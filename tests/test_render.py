@@ -1,3 +1,4 @@
+import json
 import os
 from types import MethodType
 from urllib.parse import urlparse
@@ -7,14 +8,17 @@ from plaud_poller.api import PlaudAuthError, PlaudClient
 from plaud_poller.auth import BrowserWorkspaceSession, _scan_file_for_workspace_sessions, build_login_url
 from plaud_poller.config import load_settings
 from plaud_poller.poll import (
+    append_sync_changelog,
     backup_note_before_overwrite,
     find_note_by_plaud_id,
     folder_names_from_filetags,
     format_counts,
     localize_markdown_images,
     move_note,
+    note_change_fields,
     preserve_existing_image_link_styles,
     preserve_existing_task_states,
+    process_recording,
     refresh_after_auth_error,
     resolve_note_path,
     result_counts,
@@ -25,6 +29,7 @@ from plaud_poller.poll import (
 )
 from plaud_poller.privacy import install_hook
 from plaud_poller.render import extract_summary_markdown, flatten_outline, flatten_transcript, obsidian_tag, render_obsidian_note, slug_filename, summary_from_transsumm
+from plaud_poller.state import State
 
 
 def test_extract_summary_markdown_shapes():
@@ -157,6 +162,96 @@ def test_unique_destination_adds_suffix(tmp_path):
     first = tmp_path / "Note.md"
     first.write_text("x", encoding="utf-8")
     assert unique_destination(first) == tmp_path / "Note (2).md"
+
+
+def test_note_change_fields_describes_semantic_frontmatter_and_summary_changes():
+    previous = """---
+title: Old title
+duration_ms: 100
+tags:
+  - \"work\"
+plaud_folders:
+  - \"Work\"
+has_summary: true
+---
+Old summary
+"""
+    current = """---
+title: New title
+duration_ms: 200
+tags:
+  - \"work\"
+  - \"urgent\"
+plaud_folders:
+  - \"Work\"
+  - \"Planning\"
+has_summary: true
+---
+New summary
+"""
+    assert note_change_fields(
+        previous,
+        current,
+        summary_changed=True,
+        transcript_changed=False,
+        include_outline=False,
+    ) == ["title", "duration", "tags", "folders", "summary"]
+
+
+def test_append_sync_changelog_records_compact_visible_update(tmp_path):
+    append_sync_changelog(
+        tmp_path,
+        plaud_id="abc123def",
+        note_path=tmp_path / "Meeting.md",
+        action="updated",
+        fields=["summary", "folders"],
+    )
+    lines = (tmp_path / "sync-changelog.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    event = json.loads(lines[0])
+    assert event["plaud_id"] == "abc123def"
+    assert event["note"] == "Meeting.md"
+    assert event["action"] == "updated"
+    assert event["fields"] == ["summary", "folders"]
+    assert event["at"].endswith("+00:00")
+
+
+def test_process_recording_logs_visible_duration_change(tmp_path):
+    class FakeClient:
+        duration = 100
+
+        def file_detail(self, _recording_id):
+            return {"file_name": "Meeting", "duration": self.duration}
+
+    client = FakeClient()
+    state = State(tmp_path / "state.sqlite")
+    row = {"file_id": "abc123", "file_name": "Meeting", "duration": 100}
+    kwargs = {
+        "client": client,
+        "state": state,
+        "row": row,
+        "data_dir": tmp_path / "data",
+        "obsidian_dir": tmp_path / "vault",
+        "download_audio": False,
+        "include_transcript": False,
+        "include_outline": False,
+        "filetags": {},
+        "backup_on_change": False,
+        "backup_dir": tmp_path / "backups",
+        "preserve_task_state": True,
+        "dry_run": False,
+    }
+    try:
+        assert process_recording(**kwargs).message == "new Plaud note: abc123 (new note)"
+        client.duration = 200
+        assert process_recording(**kwargs).message == "updated Plaud note: abc123 (duration)"
+    finally:
+        state.close()
+    events = [json.loads(line) for line in (tmp_path / "data" / "sync-changelog.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(event["action"], event["fields"]) for event in events] == [
+        ("new", ["new note"]),
+        ("updated", ["duration"]),
+    ]
 
 
 def test_localize_markdown_images_downloads_and_rewrites_to_obsidian_relative_path(tmp_path):

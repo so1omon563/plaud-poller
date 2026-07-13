@@ -60,6 +60,99 @@ def write_bytes_if_missing(path: Path, content: bytes) -> bool:
     return True
 
 
+FRONTMATTER_CHANGE_LABELS = {
+    "title": "title",
+    "duration_ms": "duration",
+    "plaud_updated_at": "PLAUD updated time",
+    "tags": "tags",
+    "plaud_folders": "folders",
+    "speakers": "speakers",
+    "has_summary": "summary",
+    "has_transcript": "transcript",
+    "has_outline": "outline",
+}
+
+
+def frontmatter_values(note: str | None) -> dict[str, str]:
+    """Extract the stable frontmatter values produced by ``render_obsidian_note``."""
+    if not note or not note.startswith("---\n"):
+        return {}
+    end = note.find("\n---\n", 4)
+    if end < 0:
+        return {}
+    values: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in note[4:end].splitlines():
+        match = re.match(r"^([A-Za-z][A-Za-z0-9_]*):(.*)$", line)
+        if match:
+            key = match.group(1)
+            if key is None:
+                continue
+            current = key
+            values[current] = [match.group(2).strip()]
+        elif current and line.startswith("  "):
+            values[current].append(line.strip())
+        else:
+            current = None
+    return {key: "\n".join(value) for key, value in values.items()}
+
+
+def note_change_fields(
+    previous_note: str | None,
+    current_note: str,
+    *,
+    summary_changed: bool,
+    transcript_changed: bool,
+    include_outline: bool,
+) -> list[str]:
+    """Return compact, user-facing fields changed in a rendered Obsidian note."""
+    if previous_note is None:
+        return ["new note"]
+    previous = frontmatter_values(previous_note)
+    current = frontmatter_values(current_note)
+    fields = [
+        label
+        for key, label in FRONTMATTER_CHANGE_LABELS.items()
+        if previous.get(key) != current.get(key)
+    ]
+    previous_body = previous_note.split("\n---\n", 1)[-1].strip()
+    current_body = current_note.split("\n---\n", 1)[-1].strip()
+    if previous_body != current_body:
+        if summary_changed:
+            fields.append("summary")
+        elif transcript_changed:
+            fields.append("transcript")
+        elif include_outline:
+            fields.append("outline")
+        else:
+            fields.append("content")
+    if not fields:
+        fields.append("rendered note")
+    return list(dict.fromkeys(fields))
+
+
+def append_sync_changelog(
+    data_dir: Path,
+    *,
+    plaud_id: str,
+    note_path: Path,
+    action: str,
+    fields: list[str],
+) -> None:
+    """Append a compact, non-vault audit event for a visible note change."""
+    event = {
+        "at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "plaud_id": plaud_id,
+        "note": note_path.name,
+        "action": action,
+        "fields": fields,
+    }
+    path = data_dir / "sync-changelog.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+
 MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 OBSIDIAN_WIKI_IMAGE_RE = re.compile(r"!\[\[([^\]|]+)(?:\|([^\]]*))?\]\]")
 TASK_LINE_RE = re.compile(r"^(?P<prefix>\s*[-*+]\s+\[)(?P<status>[^\]])(?P<suffix>\]\s+)(?P<body>.*)$")
@@ -614,12 +707,14 @@ def process_recording(
     note = preserve_existing_image_link_styles(note, existing_note_text)
     note_hash = sha256_text(note)
     old = state.get(rid)
+    summary_changed = old is None or old.get("summary_hash") != summary_hash
+    transcript_changed = old is None or old.get("transcript_hash") != transcript_hash
     changed = old is None or any(
         [
             old.get("title") != title,
             old.get("metadata_hash") != metadata_hash,
-            old.get("transcript_hash") != transcript_hash,
-            old.get("summary_hash") != summary_hash,
+            transcript_changed,
+            summary_changed,
             old.get("note_hash") != note_hash,
         ]
     )
@@ -679,11 +774,35 @@ def process_recording(
         changed=changed or note_written or renamed_note or artifact_written,
     )
     if old is None:
-        return SyncResult("new", f"new Plaud note: {rid[:8]}")
+        fields = note_change_fields(
+            existing_note_text,
+            note,
+            summary_changed=summary_changed,
+            transcript_changed=transcript_changed,
+            include_outline=include_outline,
+        )
+        append_sync_changelog(data_dir, plaud_id=rid, note_path=note_path, action="new", fields=fields)
+        return SyncResult("new", f"new Plaud note: {rid[:8]} ({', '.join(fields)})")
     if renamed_note:
-        return SyncResult("renamed", f"renamed Plaud note: {rid[:8]}")
+        fields = note_change_fields(
+            existing_note_text,
+            note,
+            summary_changed=summary_changed,
+            transcript_changed=transcript_changed,
+            include_outline=include_outline,
+        )
+        append_sync_changelog(data_dir, plaud_id=rid, note_path=note_path, action="renamed", fields=fields)
+        return SyncResult("renamed", f"renamed Plaud note: {rid[:8]} ({', '.join(fields)})")
     if note_written:
-        return SyncResult("updated", f"updated Plaud note: {rid[:8]}")
+        fields = note_change_fields(
+            existing_note_text,
+            note,
+            summary_changed=summary_changed,
+            transcript_changed=transcript_changed,
+            include_outline=include_outline,
+        )
+        append_sync_changelog(data_dir, plaud_id=rid, note_path=note_path, action="updated", fields=fields)
+        return SyncResult("updated", f"updated Plaud note: {rid[:8]} ({', '.join(fields)})")
     return SyncResult("unchanged", f"unchanged Plaud note: {rid[:8]}")
 
 
