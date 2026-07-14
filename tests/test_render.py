@@ -5,7 +5,7 @@ from types import MethodType
 from urllib.parse import urlparse
 
 from plaud_poller import auth
-from plaud_poller.api import PlaudAuthError, PlaudClient
+from plaud_poller.api import PlaudApiError, PlaudAuthError, PlaudClient
 from plaud_poller.auth import BrowserWorkspaceSession, _scan_file_for_workspace_sessions, build_login_url
 from plaud_poller.config import load_settings
 from plaud_poller.poll import (
@@ -254,6 +254,71 @@ def test_process_recording_logs_visible_duration_change(tmp_path):
         ("new", ["new note"]),
         ("updated", ["duration"]),
     ]
+
+
+def test_process_recording_restores_blank_note_from_cached_content_after_api_failure(tmp_path):
+    rid = "abc123"
+
+    class FakeClient:
+        def file_detail(self, _recording_id):
+            return {"file_name": "Meeting", "duration": 100, "is_trans": True, "is_summary": True, "content_list": []}
+
+        def transcript_and_summary(self, _recording_id):
+            raise PlaudApiError("temporary PLAUD content error")
+
+    data_dir = tmp_path / "data"
+    rec_dir = data_dir / "recordings" / rid
+    rec_dir.mkdir(parents=True)
+    (rec_dir / "summary.md").write_text("## Summary\nCached summary", encoding="utf-8")
+    (rec_dir / "transcript.json").write_text(json.dumps([{ "speaker": "Alice", "text": "Cached transcript" }]), encoding="utf-8")
+    (rec_dir / "outline.json").write_text("[]", encoding="utf-8")
+    note_path = tmp_path / "vault" / "Meeting.md"
+    note_path.parent.mkdir(parents=True)
+    note_path.write_text(f"---\nplaud_id: \"{rid}\"\nhas_summary: false\nhas_transcript: false\nhas_outline: false\n---\n", encoding="utf-8")
+    state = State(tmp_path / "state.sqlite")
+    state.upsert_seen(rid, title="Meeting", start_time=None, duration=100, metadata_hash="old", transcript_hash=None, summary_hash=None, note_hash="old", audio_downloaded=False, changed=False)
+    try:
+        result = process_recording(
+            client=FakeClient(), state=state, row={"file_id": rid, "file_name": "Meeting", "is_trans": True, "is_summary": True},
+            data_dir=data_dir, obsidian_dir=tmp_path / "vault", download_audio=False, include_transcript=False,
+            include_outline=False, filetags={}, backup_on_change=False, backup_dir=tmp_path / "backups",
+            preserve_task_state=True, dry_run=False,
+        )
+    finally:
+        state.close()
+    assert result.message == "restored Plaud note: abc123 (retained content after PLAUD API failure)"
+    restored = note_path.read_text(encoding="utf-8")
+    assert "has_summary: true" in restored
+    assert "Cached summary" in restored
+
+
+def test_process_recording_preserves_nonblank_note_when_plaud_content_api_fails(tmp_path):
+    rid = "abc123"
+
+    class FakeClient:
+        def file_detail(self, _recording_id):
+            return {"file_name": "Meeting", "duration": 100, "is_trans": True, "is_summary": True, "content_list": []}
+
+        def transcript_and_summary(self, _recording_id):
+            raise PlaudApiError("temporary PLAUD content error")
+
+    note_path = tmp_path / "vault" / "Meeting.md"
+    note_path.parent.mkdir(parents=True)
+    original = f"---\nplaud_id: \"{rid}\"\nhas_summary: true\nhas_transcript: true\nhas_outline: false\n---\n## Summary\nExisting content\n"
+    note_path.write_text(original, encoding="utf-8")
+    state = State(tmp_path / "state.sqlite")
+    state.upsert_seen(rid, title="Meeting", start_time=None, duration=100, metadata_hash="old", transcript_hash="old", summary_hash="old", note_hash="old", audio_downloaded=False, changed=False)
+    try:
+        result = process_recording(
+            client=FakeClient(), state=state, row={"file_id": rid, "file_name": "Meeting", "is_trans": True, "is_summary": True},
+            data_dir=tmp_path / "data", obsidian_dir=tmp_path / "vault", download_audio=False, include_transcript=False,
+            include_outline=False, filetags={}, backup_on_change=False, backup_dir=tmp_path / "backups",
+            preserve_task_state=True, dry_run=False,
+        )
+    finally:
+        state.close()
+    assert result.status == "kept"
+    assert note_path.read_text(encoding="utf-8") == original
 
 
 def test_localize_markdown_images_downloads_and_rewrites_to_obsidian_relative_path(tmp_path):

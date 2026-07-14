@@ -590,6 +590,38 @@ def fetch_content_list_artifacts(
     return segments, summary_md, outline_items
 
 
+def load_cached_content_artifacts(rec_dir: Path) -> tuple[list[dict[str, Any]] | None, str | None, list[dict[str, Any]] | None]:
+    """Return prior successful PLAUD content artifacts without treating them as new API data."""
+    transcript_segments: list[dict[str, Any]] | None = None
+    summary_md: str | None = None
+    outline_items: list[dict[str, Any]] | None = None
+    try:
+        raw = json.loads((rec_dir / "transcript.json").read_text(encoding="utf-8"))
+        if isinstance(raw, list):
+            transcript_segments = [item for item in raw if isinstance(item, dict)]
+    except (OSError, ValueError, TypeError):
+        pass
+    try:
+        text = (rec_dir / "summary.md").read_text(encoding="utf-8").strip()
+        if text:
+            summary_md = text
+    except OSError:
+        pass
+    try:
+        raw = json.loads((rec_dir / "outline.json").read_text(encoding="utf-8"))
+        if isinstance(raw, list):
+            outline_items = [item for item in raw if isinstance(item, dict)]
+    except (OSError, ValueError, TypeError):
+        pass
+    return transcript_segments, summary_md, outline_items
+
+
+def note_has_generated_content(note: str | None) -> bool:
+    if not note:
+        return False
+    return any(flag in note for flag in ("has_summary: true", "has_transcript: true", "has_outline: true"))
+
+
 def process_recording(
     *,
     client: PlaudClient,
@@ -618,6 +650,9 @@ def process_recording(
     transcript_md = ""
     outline_md = ""
     summary_md: str | None = None
+    content_fetch_failed = False
+    restored_from_cache = False
+    rec_dir = data_dir / "recordings" / rid
 
     is_trans = bool(row.get("is_trans") or detail.get("is_trans"))
     is_summary = bool(row.get("is_summary") or detail.get("is_summary"))
@@ -633,6 +668,7 @@ def process_recording(
             if content_summary_md:
                 summary_md = content_summary_md
         except Exception as exc:
+            content_fetch_failed = True
             print(f"WARN {rid}: content-list artifact fetch failed: {exc}", file=sys.stderr)
 
         if transcript_segments is None or summary_md is None:
@@ -646,7 +682,8 @@ def process_recording(
                 if summary_md is None:
                     summary_md = summary_from_transsumm(transsumm)
             except PlaudApiError as exc:
-                # Keep metadata sync alive even if transcript endpoint is temporarily unavailable.
+                content_fetch_failed = True
+                # Do not render missing source content as a destructive blank note.
                 print(f"WARN {rid}: transcript/summary fetch failed: {exc}", file=sys.stderr)
 
     if summary_md and not dry_run:
@@ -687,11 +724,61 @@ def process_recording(
             existing_note_text = note_path.read_text(encoding="utf-8")
         except OSError:
             existing_note_text = None
+
+    source_content_unavailable = content_fetch_failed and (
+        (is_trans and transcript_segments is None) or (is_summary and summary_md is None)
+    )
+    if source_content_unavailable:
+        if note_has_generated_content(existing_note_text):
+            old = state.get(rid)
+            if old is not None:
+                state.upsert_seen(
+                    rid,
+                    title=title,
+                    start_time=(detail or row).get("start_time"),
+                    duration=(detail or row).get("duration"),
+                    metadata_hash=metadata_hash,
+                    transcript_hash=old.get("transcript_hash"),
+                    summary_hash=old.get("summary_hash"),
+                    note_hash=old.get("note_hash"),
+                    audio_downloaded=bool(old.get("audio_downloaded")),
+                    changed=False,
+                )
+            return SyncResult("kept", f"kept Plaud note: {rid[:8]} (PLAUD content unavailable; existing note preserved)")
+        cached_segments, cached_summary, cached_outline = load_cached_content_artifacts(rec_dir)
+        if transcript_segments is None and cached_segments is not None:
+            transcript_segments = cached_segments
+            transcript_md = flatten_transcript(transcript_segments)
+        if summary_md is None and cached_summary is not None:
+            summary_md = cached_summary
+        if outline_items is None and cached_outline is not None:
+            outline_items = cached_outline
+            outline_md = flatten_outline(outline_items)
+        source_content_unavailable = (is_trans and transcript_segments is None) or (is_summary and summary_md is None)
+        restored_from_cache = not source_content_unavailable
+        if source_content_unavailable:
+            old = state.get(rid)
+            if old is not None:
+                state.upsert_seen(
+                    rid,
+                    title=title,
+                    start_time=(detail or row).get("start_time"),
+                    duration=(detail or row).get("duration"),
+                    metadata_hash=metadata_hash,
+                    transcript_hash=old.get("transcript_hash"),
+                    summary_hash=old.get("summary_hash"),
+                    note_hash=old.get("note_hash"),
+                    audio_downloaded=bool(old.get("audio_downloaded")),
+                    changed=False,
+                )
+            status = "kept" if note_has_generated_content(existing_note_text) else "warn"
+            return SyncResult(status, f"{status} Plaud note: {rid[:8]} (PLAUD content unavailable; existing note preserved)")
+    transcript_hash = sha256_text(stable_json(transcript_segments)) if transcript_segments is not None else None
+    summary_hash = sha256_text(summary_md) if summary_md else None
     if summary_md and preserve_task_state:
         summary_md = preserve_existing_task_states(summary_md, existing_note_text)
         summary_hash = sha256_text(summary_md)
 
-    rec_dir = data_dir / "recordings" / rid
     note = render_obsidian_note(
         plaud_id=rid,
         title=title,
@@ -803,6 +890,8 @@ def process_recording(
             include_outline=include_outline,
         )
         append_sync_changelog(data_dir, plaud_id=rid, note_path=note_path, action="updated", fields=fields)
+        if restored_from_cache:
+            return SyncResult("updated", f"restored Plaud note: {rid[:8]} (retained content after PLAUD API failure)")
         return SyncResult("updated", f"updated Plaud note: {rid[:8]} ({', '.join(fields)})")
     return SyncResult("unchanged", f"unchanged Plaud note: {rid[:8]}")
 
