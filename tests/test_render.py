@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from types import MethodType
 from urllib.parse import urlparse
 
@@ -20,6 +21,7 @@ from plaud_poller.poll import (
     preserve_existing_task_states,
     process_recording,
     refresh_after_auth_error,
+    should_silence_auth_cooldown,
     resolve_note_path,
     result_counts,
     speaker_names_from_segments,
@@ -417,7 +419,7 @@ def test_refresh_after_auth_error_respects_auto_refresh_flag(tmp_path):
     old = os.environ.get("PLAUD_AUTO_REFRESH_TOKEN")
     try:
         os.environ.pop("PLAUD_AUTO_REFRESH_TOKEN", None)
-        refreshed, message = refresh_after_auth_error(tmp_path)
+        refreshed, message = refresh_after_auth_error(tmp_path, tmp_path / "data")
         assert refreshed is False
         assert "disabled" in message
     finally:
@@ -425,6 +427,93 @@ def test_refresh_after_auth_error_respects_auto_refresh_flag(tmp_path):
             os.environ.pop("PLAUD_AUTO_REFRESH_TOKEN", None)
         else:
             os.environ["PLAUD_AUTO_REFRESH_TOKEN"] = old
+
+
+def test_refresh_after_auth_error_uses_bounded_browser_login_when_enabled(tmp_path):
+    keys = [
+        "PLAUD_AUTO_REFRESH_TOKEN",
+        "PLAUD_AUTO_BROWSER_LOGIN",
+        "PLAUD_AUTO_BROWSER_LOGIN_COOLDOWN_SECONDS",
+    ]
+    old_env = {key: os.environ.get(key) for key in keys}
+    old_refresh = auth.refresh_env_token
+    old_browser_login = auth.browser_login_refresh
+    calls: list[dict] = []
+    try:
+        os.environ.update(
+            {
+                "PLAUD_AUTO_REFRESH_TOKEN": "true",
+                "PLAUD_AUTO_BROWSER_LOGIN": "true",
+                "PLAUD_AUTO_BROWSER_LOGIN_COOLDOWN_SECONDS": "21600",
+            }
+        )
+        auth.refresh_env_token = lambda *_args, **_kwargs: (False, "no usable storage token")
+
+        def fake_browser_login(_env_path, **kwargs):
+            calls.append(kwargs)
+            return True, "fresh PLAUD workspace token"
+
+        auth.browser_login_refresh = fake_browser_login
+        data_dir = tmp_path / "data"
+        refreshed, message = refresh_after_auth_error(tmp_path, data_dir)
+        assert refreshed is True
+        assert "fresh PLAUD workspace token" in message
+        assert calls == [{"timeout_seconds": 90, "interval_seconds": 5, "open_browser": True, "login_method": "generic"}]
+        assert not (data_dir / ".browser-login-recovery.json").exists()
+    finally:
+        auth.refresh_env_token = old_refresh
+        auth.browser_login_refresh = old_browser_login
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_refresh_after_auth_error_rate_limits_failed_browser_login(tmp_path):
+    keys = ["PLAUD_AUTO_REFRESH_TOKEN", "PLAUD_AUTO_BROWSER_LOGIN", "PLAUD_AUTO_BROWSER_LOGIN_COOLDOWN_SECONDS"]
+    old_env = {key: os.environ.get(key) for key in keys}
+    old_refresh = auth.refresh_env_token
+    old_browser_login = auth.browser_login_refresh
+    try:
+        os.environ.update(
+            {
+                "PLAUD_AUTO_REFRESH_TOKEN": "true",
+                "PLAUD_AUTO_BROWSER_LOGIN": "true",
+                "PLAUD_AUTO_BROWSER_LOGIN_COOLDOWN_SECONDS": "21600",
+            }
+        )
+        auth.refresh_env_token = lambda *_args, **_kwargs: (False, "no usable storage token")
+        auth.browser_login_refresh = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not open browser during cooldown"))
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / ".browser-login-recovery.json").write_text(json.dumps({"last_attempt_at": time.time()}), encoding="utf-8")
+        refreshed, message = refresh_after_auth_error(tmp_path, data_dir)
+        assert refreshed is False
+        assert "cooldown active" in message
+    finally:
+        auth.refresh_env_token = old_refresh
+        auth.browser_login_refresh = old_browser_login
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_scheduled_auth_cooldown_is_silent_but_manual_is_not():
+    old = os.environ.get("PLAUD_SILENCE_AUTH_COOLDOWN")
+    message = "no usable storage token; browser-login cooldown active (retry in 10s)"
+    try:
+        os.environ.pop("PLAUD_SILENCE_AUTH_COOLDOWN", None)
+        assert should_silence_auth_cooldown(message) is False
+        os.environ["PLAUD_SILENCE_AUTH_COOLDOWN"] = "true"
+        assert should_silence_auth_cooldown(message) is True
+    finally:
+        if old is None:
+            os.environ.pop("PLAUD_SILENCE_AUTH_COOLDOWN", None)
+        else:
+            os.environ["PLAUD_SILENCE_AUTH_COOLDOWN"] = old
 
 
 def test_validate_token_does_not_recurse_on_region_redirect_cycle():

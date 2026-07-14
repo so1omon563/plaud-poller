@@ -10,11 +10,12 @@ from pathlib import Path
 import re
 import shutil
 import sys
+import time
 from typing import Any
 from urllib.parse import unquote
 
 from .api import PlaudApiError, PlaudAuthError, PlaudClient, maybe_gunzip
-from .config import load_settings
+from .config import load_settings, truthy
 from .render import (
     extract_summary_markdown,
     flatten_outline,
@@ -806,9 +807,20 @@ def process_recording(
     return SyncResult("unchanged", f"unchanged Plaud note: {rid[:8]}")
 
 
-def refresh_after_auth_error(repo_root: Path) -> tuple[bool, str]:
-    """Force a browser-session refresh after PLAUD rejects a still-unexpired token."""
-    from .auth import refresh_env_token
+def should_silence_auth_cooldown(message: str) -> bool:
+    """Keep scheduled cooldown runs quiet after their initial recovery alert."""
+    return "browser-login cooldown active" in message and truthy(os.environ.get("PLAUD_SILENCE_AUTH_COOLDOWN"))
+
+
+def refresh_after_auth_error(repo_root: Path, data_dir: Path) -> tuple[bool, str]:
+    """Recover once from PLAUD auth rejection with bounded browser assistance.
+
+    The normal browser-storage refresh remains the first attempt. When explicitly
+    enabled, a failed storage refresh may open PLAUD in Chrome once, wait for a
+    new PLAUD workspace session, and retry the poll. Failed browser attempts are
+    rate-limited by a marker in the local data directory.
+    """
+    from .auth import browser_login_refresh, refresh_env_token
     from .config import load_dotenv, truthy
 
     if not truthy(os.environ.get("PLAUD_AUTO_REFRESH_TOKEN")):
@@ -817,7 +829,39 @@ def refresh_after_auth_error(repo_root: Path) -> tuple[bool, str]:
     changed, message = refresh_env_token(env_path, force=True)
     if changed:
         load_dotenv(env_path, override=True)
-    return changed, message
+        return True, message
+    if not truthy(os.environ.get("PLAUD_AUTO_BROWSER_LOGIN")):
+        return False, message
+
+    cooldown_seconds = max(0, int(os.environ.get("PLAUD_AUTO_BROWSER_LOGIN_COOLDOWN_SECONDS", "21600")))
+    marker_path = data_dir / ".browser-login-recovery.json"
+    now = time.time()
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        last_attempt = float(marker.get("last_attempt_at", 0))
+    except (OSError, ValueError, TypeError):
+        last_attempt = 0
+    remaining = cooldown_seconds - (now - last_attempt)
+    if remaining > 0:
+        return False, f"{message}; browser-login cooldown active (retry in {int(remaining)}s)"
+
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text(json.dumps({"last_attempt_at": now}) + "\n", encoding="utf-8")
+    changed, browser_message = browser_login_refresh(
+        env_path,
+        timeout_seconds=max(1, int(os.environ.get("PLAUD_AUTO_BROWSER_LOGIN_TIMEOUT_SECONDS", "90"))),
+        interval_seconds=max(1, int(os.environ.get("PLAUD_AUTO_BROWSER_LOGIN_INTERVAL_SECONDS", "5"))),
+        open_browser=True,
+        login_method=os.environ.get("PLAUD_AUTO_BROWSER_LOGIN_METHOD", "generic"),
+    )
+    if changed:
+        load_dotenv(env_path, override=True)
+        try:
+            marker_path.unlink()
+        except OSError:
+            pass
+        return True, browser_message
+    return False, f"{message}; {browser_message}"
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -839,8 +883,10 @@ def run(argv: list[str] | None = None) -> int:
             rows = client.list_all(page_size=settings.page_size, include_trash=settings.include_trash)
             filetags = client.list_filetags()
         except PlaudAuthError as exc:
-            refreshed, refresh_message = refresh_after_auth_error(repo_root)
+            refreshed, refresh_message = refresh_after_auth_error(repo_root, settings.data_dir)
             if not refreshed:
+                if should_silence_auth_cooldown(refresh_message):
+                    return 0
                 raise PlaudAuthError(f"{exc}; auto-refresh failed: {refresh_message}") from exc
             settings = load_settings(repo_root)
             client = PlaudClient(settings)

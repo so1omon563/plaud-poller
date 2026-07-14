@@ -285,9 +285,19 @@ Optional auto-refresh before every poll:
 ```bash
 PLAUD_AUTO_REFRESH_TOKEN=true
 PLAUD_REFRESH_MIN_TTL_SECONDS=3600
+
+# Optional: after PLAUD rejects a token and a storage-only refresh fails,
+# open PLAUD in the local Chrome profile once and wait for a fresh workspace token.
+PLAUD_AUTO_BROWSER_LOGIN=true
+PLAUD_AUTO_BROWSER_LOGIN_METHOD=google
+PLAUD_AUTO_BROWSER_LOGIN_TIMEOUT_SECONDS=90
+PLAUD_AUTO_BROWSER_LOGIN_INTERVAL_SECONDS=5
+PLAUD_AUTO_BROWSER_LOGIN_COOLDOWN_SECONDS=21600
 ```
 
-When enabled, the poller scans local Chromium-family browser storage before polling. If the `.env` token is missing, expired, or near expiry, and a valid browser token is found, `.env` is updated automatically. If PLAUD rejects a still-unexpired token during polling, the poller also attempts one forced browser-session refresh and retries the API request before failing. PLAUD region redirects are bounded: each known region is tried at most once, and workspace-refresh redirects stop when a previously visited region/domain pair repeats. This is intended for personal machines where you stay logged into `https://web.plaud.ai/`. For servers and containers, prefer explicit token management.
+When enabled, the poller scans local Chromium-family browser storage before polling. If the `.env` token is missing, expired, or near expiry, and a valid browser token is found, `.env` is updated automatically. If PLAUD rejects a still-unexpired token during polling, the poller attempts one forced storage refresh and retries the API request once.
+
+`PLAUD_AUTO_BROWSER_LOGIN` is an explicit personal-machine opt-in for the case where PLAUD needs a browser re-exchange. After a failed storage refresh, it opens the PLAUD login URL in Chrome and waits for a fresh **PLAUD** workspace token, then retries the poll once. It never reads identity-provider credentials or automates password, MFA, or consent prompts. A failed browser attempt is rate-limited by `$PLAUD_DATA_DIR/.browser-login-recovery.json` (six hours by default) to prevent browser-tab and cron-alert loops. PLAUD region redirects are bounded: each known region is tried at most once, and workspace-refresh redirects stop when a previously visited region/domain pair repeats. This is intended for personal machines where you stay logged into `https://web.plaud.ai/`. For servers and containers, prefer explicit token management.
 
 ## Usage
 
