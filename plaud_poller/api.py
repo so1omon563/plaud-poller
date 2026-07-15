@@ -41,6 +41,7 @@ class PlaudClient:
         body: bytes | None = None,
         headers: dict[str, str] | None = None,
         retry_region: bool = True,
+        accepted_statuses: tuple[int, ...] = (0,),
     ) -> Any:
         text = self._request_text(path, method=method, body=body, headers=headers)
         try:
@@ -67,7 +68,7 @@ class PlaudClient:
                 ) from exc
         if isinstance(parsed, dict):
             status = parsed.get("status")
-            if isinstance(status, int) and status != 0:
+            if isinstance(status, int) and status not in accepted_statuses:
                 msg = str(parsed.get("msg") or parsed)[:500]
                 if status in {-401, -419} or "token" in msg.lower() or "expired" in msg.lower():
                     raise PlaudAuthError(msg)
@@ -179,7 +180,16 @@ class PlaudClient:
         return dict(data.get("data") or {})
 
     def transcript_and_summary(self, recording_id: str) -> dict[str, Any]:
-        return dict(self.request_json(f"/ai/transsumm/{recording_id}", method="POST", body=b"{}"))
+        # PLAUD's transsumm endpoint uses status=1 with msg="success", unlike
+        # the status=0 convention used by file/auth endpoints.
+        return dict(
+            self.request_json(
+                f"/ai/transsumm/{recording_id}",
+                method="POST",
+                body=b"{}",
+                accepted_statuses=(0, 1),
+            )
+        )
 
     def temp_audio_url(self, recording_id: str) -> str:
         data = self.request_json(f"/file/temp-url/{recording_id}")

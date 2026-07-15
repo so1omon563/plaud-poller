@@ -480,6 +480,28 @@ def test_plaud_status_token_expired_raises_auth_error():
         raise AssertionError("expired PLAUD status should raise PlaudAuthError")
 
 
+def test_transcript_and_summary_accepts_plaud_status_one_success_only_for_that_endpoint():
+    client = PlaudClient.__new__(PlaudClient)
+    calls = []
+
+    def fake_request_text(self, path_or_url, *, method="GET", body=None, headers=None):
+        calls.append((path_or_url, method, body))
+        return '{"status": 1, "msg": "success", "data_result": [{"speaker": "Example"}]}'
+
+    client._request_text = MethodType(fake_request_text, client)
+    try:
+        client.request_json("/file/detail/example")
+    except PlaudApiError as exc:
+        assert "status 1" in str(exc)
+    else:
+        raise AssertionError("status 1 must remain an error for ordinary API endpoints")
+
+    payload = client.transcript_and_summary("example")
+    assert payload["status"] == 1
+    assert payload["data_result"] == [{"speaker": "Example"}]
+    assert calls[-1] == ("/ai/transsumm/example", "POST", b"{}")
+
+
 def test_refresh_after_auth_error_respects_auto_refresh_flag(tmp_path):
     old = os.environ.get("PLAUD_AUTO_REFRESH_TOKEN")
     try:
